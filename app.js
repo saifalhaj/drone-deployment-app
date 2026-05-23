@@ -2593,6 +2593,172 @@
   const dlGenBtn = document.getElementById('downloadGeneratedBtn');
   if (dlGenBtn) dlGenBtn.onclick = exportIncidentsCSV;
 
+  // ============ MAP CAPTURE FOR PDF ============
+  // Returns a canvas at the actual on-screen size of the map container, with:
+  //   1. Tile layer captured via html2canvas (only the tile pane — not overlays)
+  //   2. All overlays (operational area, no-fly, no-deploy, coverage circles,
+  //      stations, incidents) drawn as Canvas2D primitives using Leaflet's
+  //      `latLngToContainerPoint` for pixel-exact alignment with the tiles.
+  // The output is a single composited canvas suitable for embedding in the PDF.
+  async function captureMapForPdf() {
+    const mapEl = document.getElementById('map');
+    const rect = mapEl.getBoundingClientRect();
+    const W = Math.round(rect.width);
+    const H = Math.round(rect.height);
+
+    // Step 1: capture ONLY the tile pane to avoid the overlay-alignment problem.
+    // Leaflet exposes tile/marker/overlay/popup panes; we just want the raster tiles.
+    const tilePane = mapEl.querySelector('.leaflet-tile-pane');
+    let tileCanvas;
+    if (tilePane) {
+      tileCanvas = await html2canvas(tilePane, {
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#0d1117',
+        logging: false,
+        scale: 1,    // 1× for reasonable file size; satellite imagery is photographic
+        width: W,
+        height: H,
+        windowWidth: W,
+        windowHeight: H
+      });
+    } else {
+      tileCanvas = document.createElement('canvas');
+      tileCanvas.width = W; tileCanvas.height = H;
+      const fctx = tileCanvas.getContext('2d');
+      fctx.fillStyle = '#0d1117';
+      fctx.fillRect(0, 0, W, H);
+    }
+
+    // Step 2: composite onto a final canvas
+    const out = document.createElement('canvas');
+    out.width = W; out.height = H;
+    const ctx = out.getContext('2d');
+    // Dark background in case any tiles are missing
+    ctx.fillStyle = '#0d1117';
+    ctx.fillRect(0, 0, W, H);
+    ctx.drawImage(tileCanvas, 0, 0, W, H);
+
+    // Step 3: draw overlays using Leaflet's latLng → screen-pixel transform.
+    // This is what guarantees perfect alignment: we ask Leaflet itself where each
+    // lat/lng falls on screen RIGHT NOW, then draw directly to those pixels.
+    function ll2px(latlng) {
+      // latLngToContainerPoint returns a Point in CSS px relative to the map element
+      return map.latLngToContainerPoint(L.latLng(latlng.lat, latlng.lng));
+    }
+    function polyPath(ring) {
+      ctx.beginPath();
+      for (let i = 0; i < ring.length; i++) {
+        const p = ll2px(ring[i]);
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      }
+      ctx.closePath();
+    }
+    function getRing(polygon) {
+      const r = polygon.getLatLngs();
+      return Array.isArray(r[0]) ? r[0] : r;
+    }
+    // Helper to draw a dashed-stroked filled polygon
+    function drawPolygon(polygon, fillRgba, strokeColor, dashed) {
+      const ring = getRing(polygon);
+      polyPath(ring);
+      if (fillRgba) {
+        ctx.fillStyle = fillRgba;
+        ctx.fill();
+      }
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 2;
+      if (dashed) ctx.setLineDash([6, 4]); else ctx.setLineDash([]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // 3a. Operational area
+    if (areaPolygon) {
+      drawPolygon(areaPolygon, null, '#f59e0b', false);
+    }
+
+    // 3b. No-fly zones (coral, dashed, translucent fill)
+    for (const z of noFlyZones) {
+      drawPolygon(z, 'rgba(251, 113, 133, 0.15)', '#fb7185', true);
+    }
+
+    // 3c. No-deploy zones (purple, dashed, translucent fill)
+    for (const z of noDeployZones) {
+      drawPolygon(z, 'rgba(167, 139, 250, 0.12)', '#a78bfa', true);
+    }
+
+    // 3d. Coverage circles (one per station). Compute pixel radius from a point
+    // at the station's lat/lng offset by the station radius in meters — we use
+    // the meters-per-pixel ratio at the map's current zoom.
+    if (stations.length > 0) {
+      // Compute pixels-per-meter at the centroid of stations for the radius
+      const pixelsPerMeter = (function() {
+        const s0 = stations[0];
+        const p1 = ll2px({ lat: s0.lat, lng: s0.lng });
+        // Offset a small distance east, convert to meters
+        const earthRadius = 6378137; // WGS84
+        const offsetMeters = 100;
+        const dLng = (offsetMeters / earthRadius) * (180 / Math.PI) / Math.cos(s0.lat * Math.PI / 180);
+        const p2 = ll2px({ lat: s0.lat, lng: s0.lng + dLng });
+        return Math.abs(p2.x - p1.x) / offsetMeters;
+      })();
+
+      ctx.fillStyle = 'rgba(34, 211, 238, 0.10)';
+      ctx.strokeStyle = 'rgba(34, 211, 238, 0.45)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([]);
+      for (const s of stations) {
+        const p = ll2px({ lat: s.lat, lng: s.lng });
+        const rPx = s.radius * pixelsPerMeter;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, rPx, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    // 3e. Incident dots (category-colored). Larger weight = larger dot, same logic
+    // as the on-screen renderer.
+    const weights = incidentCategories.map(c => c.weight || 0);
+    const maxW = Math.max(1, ...weights);
+    for (const inc of incidents) {
+      const cat = getCategoryById(inc.priority);
+      const wRatio = (cat.weight || 0) / maxW;
+      const r = 3 + Math.round(wRatio * 2);
+      const p = ll2px({ lat: inc.lat, lng: inc.lng });
+      ctx.fillStyle = cat.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 3f. Station markers (drawn last so they sit on top of everything else).
+    // Match the on-screen style: orange disc with dark outline, count label inside.
+    for (let i = 0; i < stations.length; i++) {
+      const s = stations[i];
+      const p = ll2px({ lat: s.lat, lng: s.lng });
+      ctx.fillStyle = '#f59e0b';
+      ctx.strokeStyle = '#0a0e14';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // Index label
+      ctx.fillStyle = '#0a0e14';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(i + 1), p.x, p.y + 0.5);
+    }
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
+
+    return out;
+  }
+
   // ============ PDF REPORT GENERATION ============
   async function generatePDFReport() {
     if (incidents.length === 0 || stations.length === 0) {
@@ -2614,16 +2780,25 @@
         map.fitBounds(bounds, { padding: [30, 30], animate: false });
       }
       // Give tiles a beat to load (longer for slow tile servers / many tiles)
-      await new Promise(r => setTimeout(r, 1200));
+      await new Promise(r => setTimeout(r, 1500));
 
-      const mapCanvas = await html2canvas(document.getElementById('map'), {
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: '#0d1117',
-        logging: false,
-        scale: 2
-      });
-      const mapDataUrl = mapCanvas.toDataURL('image/png');
+      // ============ MAP CAPTURE — TILES + MANUALLY-DRAWN OVERLAYS ============
+      // Why not just html2canvas the whole #map div?
+      // Because Leaflet renders the tile layer and the SVG/marker overlays at
+      // different CSS-transform contexts. html2canvas picks up the transforms
+      // inconsistently, so polygons and markers drift relative to the tiles in
+      // the captured raster. The visible app looks correct; the PDF doesn't.
+      //
+      // The fix: capture only the tile layer (which is pixel-aligned to the
+      // map container), then draw every overlay as Canvas2D primitives using
+      // Leaflet's own `latLngToContainerPoint`. This guarantees pixel-perfect
+      // alignment because we compute positions ourselves rather than trusting
+      // html2canvas to read Leaflet's nested transforms.
+      const mapCanvas = await captureMapForPdf();
+      // JPEG instead of PNG for the photographic tile content — 5-10× smaller
+      // file with no perceptible quality loss for satellite imagery. Overlays
+      // stay sharp because they're drawn as solid colors on top.
+      const mapDataUrl = mapCanvas.toDataURL('image/jpeg', 0.82);
 
       // Render marginal-value charts to off-screen canvases for embedding
       const curve = window.__lastCurve || computeMarginalCurves(stations, incidents);
