@@ -1,0 +1,19 @@
+# Force LF line endings on text files across all platforms.
+# Without this, Windows users will see massive line-ending churn in diffs.
+* text=auto eol=lf
+
+# Treat these as text explicitly
+*.html text
+*.css  text
+*.js   text
+*.md   text
+*.json text
+
+# Binary files (no line-ending mangling)
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.pdf  binary
+*.ico  binary
+*.kmz  binary
+*.xlsx binary

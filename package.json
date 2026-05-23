@@ -1,0 +1,12 @@
+{
+  "name": "dfr-deployment-planner",
+  "version": "0.1.0",
+  "description": "DFR (Drone First Response) deployment planning tool — UASC, Dubai Police",
+  "private": true,
+  "scripts": {
+    "build": "node build.js",
+    "dev": "echo 'Right-click index.html in VS Code → Open with Live Server. Or run: npx serve .'"
+  },
+  "author": "Unmanned Aerial Systems Center — Dubai Police",
+  "license": "UNLICENSED"
+}

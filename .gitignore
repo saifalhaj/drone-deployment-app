@@ -1,0 +1,22 @@
+# Build output
+dist/
+build/
+
+# Editor / OS
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Dependencies (only if you ever add npm later)
+node_modules/
+
+# Local scratch
+scratch/
+*.tmp
