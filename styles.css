@@ -693,7 +693,8 @@ footer {
   padding: 10px 14px; border-radius: 0 3px 3px 0;
   font-size: 13px; color: var(--text); line-height: 1.5;
 }
-.about-logo { display: block; margin: 0 auto 14px; width: 70px; height: auto; opacity: 0.95; }
+.about-logo { display: block; margin: 0 auto 14px; width: 140px; height: auto; opacity: 0.95; }
+.about-closing-divider { border: none; border-top: 1px solid var(--border); margin: 28px 0 0; }
 .about-closing { font-style: italic; color: var(--text-muted); margin-top: 18px; font-size: 13.5px; text-align: center; }
 .about-mission {
   text-align: center; padding-top: 12px;
