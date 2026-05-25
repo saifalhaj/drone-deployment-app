@@ -3705,7 +3705,7 @@
   // the modal nodes don't exist yet, so we wire the handlers after DOMContentLoaded
   // / on the next tick. setTimeout(fn, 0) is enough because the parser will have
   // finished by the time the timer fires.
-  const aboutTotal = 6;
+  const aboutTotal = 3;
   let aboutCurrentPage = 0;
 
   function showAboutPage(p) {
@@ -3770,10 +3770,15 @@
   }
 
   // Wire after DOM is parsed (modal HTML is below this script)
+  function wireAboutAndLogo() {
+    wireAboutModal();
+    const logoEl = document.getElementById('aboutPageLogo');
+    if (logoEl) logoEl.src = UASC_LOGO_WHITE;
+  }
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', wireAboutModal);
+    document.addEventListener('DOMContentLoaded', wireAboutAndLogo);
   } else {
-    setTimeout(wireAboutModal, 0);
+    setTimeout(wireAboutAndLogo, 0);
   }
 
   document.getElementById('incidentFileInput').onchange = async function(e) {
