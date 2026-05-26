@@ -3034,7 +3034,7 @@
     handleAreaCreated(layer);
     map.fitBounds(layer.getBounds(), { padding: [20, 20] });
     const name = boundaryName(feature);
-    document.getElementById('status1').textContent += ` Â· ${name}`;
+    document.getElementById('status1').textContent += `  -  ${name}`;
     setFooter('Operational area loaded: ' + name);
   };
 
