@@ -51,5 +51,11 @@ html = html.replace(
 
 fs.writeFileSync(OUT, html, 'utf-8');
 
+const dataSrc = path.join(ROOT, 'data');
+const dataOut = path.join(DIST, 'data');
+if (fs.existsSync(dataSrc)) {
+  fs.cpSync(dataSrc, dataOut, { recursive: true });
+}
+
 const size = (fs.statSync(OUT).size / 1024).toFixed(1);
 console.log(`✓ Built ${path.relative(ROOT, OUT)}  (${size} KB)`);

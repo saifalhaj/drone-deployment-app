@@ -35,6 +35,7 @@
   const areaLayer = new L.FeatureGroup().addTo(map);
   const noFlyLayer = new L.FeatureGroup().addTo(map);
   const noDeployLayer = new L.FeatureGroup().addTo(map);
+  const waterLayer = new L.FeatureGroup().addTo(map);
   const coverageLayer = new L.LayerGroup().addTo(map);
   const incidentLayer = new L.LayerGroup().addTo(map);
   const stationLayer = new L.LayerGroup().addTo(map);
@@ -45,6 +46,7 @@
   let areaPolygon = null;
   let noFlyZones = [];     // L.polygon[] — drones cannot cross or be inside
   let noDeployZones = [];  // L.polygon[] — stations cannot be placed inside (drones may fly through)
+  let waterZones = [];
   let incidents = [];
   let stations = [];
   let unitSystem = 'metric';
@@ -107,14 +109,41 @@
     return out;
   }
 
+  function polygonRings(polygon) {
+    const rings = polygon.getLatLngs();
+    if (!Array.isArray(rings[0])) return [rings];
+    if (Array.isArray(rings[0][0])) return rings.flat();
+    return rings;
+  }
+
+  function buildWaterZoneCache(zones) {
+    const out = [];
+    for (const zone of zones) {
+      const rings = polygonRings(zone);
+      const outer = rings[0];
+      if (!outer || outer.length < 3) continue;
+      let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+      for (const pt of outer) {
+        if (pt.lat < minLat) minLat = pt.lat;
+        if (pt.lat > maxLat) maxLat = pt.lat;
+        if (pt.lng < minLng) minLng = pt.lng;
+        if (pt.lng > maxLng) maxLng = pt.lng;
+      }
+      out.push({ ring: outer, holes: rings.slice(1), minLat, maxLat, minLng, maxLng });
+    }
+    return out;
+  }
+
   // Caches refreshed at the start of every Compute Deployment run.
   // Populated by computeZoneCaches() before the optimizer runs.
   let __noFlyCache = [];
   let __noDeployCache = [];
+  let __waterCache = [];
 
   function computeZoneCaches() {
     __noFlyCache = buildZoneCache(noFlyZones);
     __noDeployCache = buildZoneCache(noDeployZones);
+    __waterCache = buildWaterZoneCache(waterZones);
   }
 
   // Returns true if point is inside any no-fly zone
@@ -153,6 +182,39 @@
     return false;
   }
 
+  function isInWaterZone(point) {
+    const cache = __waterCache.length > 0 ? __waterCache : null;
+    if (cache) {
+      for (let i = 0; i < cache.length; i++) {
+        const z = cache[i];
+        if (point.lat < z.minLat || point.lat > z.maxLat || point.lng < z.minLng || point.lng > z.maxLng) continue;
+        if (!pointInRing(point.lat, point.lng, z.ring)) continue;
+        let inHole = false;
+        for (const hole of z.holes) {
+          if (pointInRing(point.lat, point.lng, hole)) {
+            inHole = true;
+            break;
+          }
+        }
+        if (!inHole) return true;
+      }
+      return false;
+    }
+    for (const zone of waterZones) {
+      const rings = polygonRings(zone);
+      if (!rings[0] || !pointInRing(point.lat, point.lng, rings[0])) continue;
+      let inHole = false;
+      for (let i = 1; i < rings.length; i++) {
+        if (pointInRing(point.lat, point.lng, rings[i])) {
+          inHole = true;
+          break;
+        }
+      }
+      if (!inHole) return true;
+    }
+    return false;
+  }
+
   // True if a point is a valid INCIDENT location: inside operational area.
   // Incidents CAN occur in no-fly zones — drones respond to the nearest reachable
   // boundary point instead.
@@ -166,6 +228,7 @@
     if (!isValidLocation(point)) return false;
     if (isInNoFlyZone(point)) return false;
     if (isInNoDeployZone(point)) return false;
+    if (isInWaterZone(point)) return false;
     return true;
   }
 
@@ -1880,13 +1943,19 @@
     coverageLayer.clearLayers();
     noFlyLayer.clearLayers();
     noDeployLayer.clearLayers();
+    waterLayer.clearLayers();
     areaPolygon = null;
     incidents = [];
     stations = [];
     noFlyZones = [];
     noDeployZones = [];
+    waterZones = [];
+    __noFlyCache = [];
+    __noDeployCache = [];
+    __waterCache = [];
     updateNoFlyStatus();
     updateNoDeployStatus();
+    updateWaterStatus();
 
     setPanelState('panel1', 'active');
     setPanelState('panel2', null);
@@ -1963,6 +2032,11 @@
         coordinates: [(Array.isArray(areaPolygon.getLatLngs()[0]) ? areaPolygon.getLatLngs()[0] : areaPolygon.getLatLngs()).map(ll => [ll.lng, ll.lat])],
         area_km2: areaPolygon ? polygonAreaKm2(areaPolygon) : null
       } : null,
+      constraints: {
+        no_fly_zones: noFlyZones.length,
+        no_deploy_zones: noDeployZones.length,
+        water_exclusion_zones: waterZones.length
+      },
       incidents: incidents.map(i => ({ lat: i.lat, lng: i.lng, t: i.t, category: i.priority })),
       sites: stations.map((s, idx) => ({
         id: idx + 1,
@@ -2519,6 +2593,59 @@
     }
   }
 
+  function addWaterZone(polygon) {
+    polygon.setStyle({ color: '#4ea7c8', weight: 2, fillColor: '#4ea7c8', fillOpacity: 0.16, dashArray: '3,4' });
+    waterLayer.addLayer(polygon);
+    waterZones.push(polygon);
+    __waterCache = [];
+    updateWaterStatus();
+  }
+
+  function clearAllWaterZones() {
+    waterLayer.clearLayers();
+    waterZones = [];
+    __waterCache = [];
+    updateWaterStatus();
+  }
+
+  function updateWaterStatus() {
+    const el = document.getElementById('statusWater');
+    const dl = document.getElementById('downloadWater');
+    if (!el) return;
+    if (waterZones.length === 0) {
+      el.textContent = 'No water exclusions';
+      el.classList.remove('good');
+      if (dl) dl.disabled = true;
+    } else {
+      el.textContent = `${waterZones.length} water exclusion polygon${waterZones.length === 1 ? '' : 's'} active`;
+      el.classList.add('good');
+      if (dl) dl.disabled = false;
+    }
+  }
+
+  function addWaterGeoJson(geo) {
+    const features = geo.type === 'FeatureCollection' ? geo.features : [geo];
+    let added = 0;
+    for (const feature of features) {
+      const geom = feature && feature.geometry;
+      if (!geom) continue;
+      if (geom.type === 'Polygon') {
+        const rings = geom.coordinates.map(geoJsonRingToLatLngs).filter(r => r.length >= 3);
+        if (rings.length === 0) continue;
+        addWaterZone(L.polygon(rings.map(ring => ring.map(pt => [pt.lat, pt.lng]))));
+        added++;
+      } else if (geom.type === 'MultiPolygon') {
+        for (const poly of geom.coordinates) {
+          const rings = poly.map(geoJsonRingToLatLngs).filter(r => r.length >= 3);
+          if (rings.length === 0) continue;
+          addWaterZone(L.polygon(rings.map(ring => ring.map(pt => [pt.lat, pt.lng]))));
+          added++;
+        }
+      }
+    }
+    return added;
+  }
+
   // ============ DRAW NO-FLY ZONE ============
   document.getElementById('drawNoFlyBtn').onclick = function() {
     const btn = document.getElementById('drawNoFlyBtn');
@@ -2556,6 +2683,31 @@
   document.getElementById('clearNoDeploy').onclick = function() {
     clearAllNoDeployZones();
     setFooter('No-deploy zones cleared');
+  };
+
+  document.getElementById('clearWater').onclick = function() {
+    clearAllWaterZones();
+    setFooter('Water exclusions cleared');
+  };
+
+  document.getElementById('loadNaturalEarthWater').onclick = async function() {
+    const btn = this;
+    try {
+      btn.disabled = true;
+      setFooter('Loading Natural Earth water polygons...');
+      const res = await fetch('data/natural-earth-water.geojson');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const geo = await res.json();
+      clearAllWaterZones();
+      const added = addWaterGeoJson(geo);
+      setFooter(`${added} Natural Earth water polygon${added === 1 ? '' : 's'} loaded`);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to load built-in water data: ' + err.message);
+      setFooter('Water load failed');
+    } finally {
+      btn.disabled = false;
+    }
   };
 
   // ============ ONLINE BOUNDARY LIBRARY ============
@@ -2962,6 +3114,29 @@
     e.target.value = '';
   };
 
+  document.getElementById('waterFileInput').onchange = async function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      setFooter('Parsing ' + file.name + '...');
+      const polys = await parseAreaFile(file);
+      if (polys.length === 0) {
+        setFooter('No water polygons found in file');
+        return;
+      }
+      clearAllWaterZones();
+      for (const p of polys) {
+        const layer = L.polygon(p.map(pt => [pt.lat, pt.lng]));
+        addWaterZone(layer);
+      }
+      setFooter(polys.length + ' water exclusion polygon' + (polys.length === 1 ? '' : 's') + ' loaded');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to parse file: ' + err.message);
+    }
+    e.target.value = '';
+  };
+
   // ============ KMZ EXPORT ============
   function escapeXml(s) {
     return String(s).replace(/[<>&"']/g, c => ({
@@ -3000,7 +3175,8 @@
   const KMZ_STYLES = {
     area:     '<Style id="area"><LineStyle><color>ff0ba6f5</color><width>2</width></LineStyle><PolyStyle><color>1a0ba6f5</color></PolyStyle></Style>',
     nofly:    '<Style id="nofly"><LineStyle><color>ff8571fb</color><width>2</width></LineStyle><PolyStyle><color>408571fb</color></PolyStyle></Style>',
-    nodeploy: '<Style id="nodeploy"><LineStyle><color>fffa8ba7</color><width>2</width></LineStyle><PolyStyle><color>30fa8ba7</color></PolyStyle></Style>'
+    nodeploy: '<Style id="nodeploy"><LineStyle><color>fffa8ba7</color><width>2</width></LineStyle><PolyStyle><color>30fa8ba7</color></PolyStyle></Style>',
+    water:    '<Style id="water"><LineStyle><color>ffc8a74e</color><width>2</width></LineStyle><PolyStyle><color>40c8a74e</color></PolyStyle></Style>'
   };
 
   async function downloadKmz(filename, kmlText) {
@@ -3054,6 +3230,16 @@
     const kml = buildKml('DFR No-Deploy Zones', placemarks, KMZ_STYLES.nodeploy);
     await downloadKmz(`UASC_NoDeploy_Zones_${new Date().toISOString().slice(0,10)}.kmz`, kml);
     setFooter(`${noDeployZones.length} no-deploy zone${noDeployZones.length === 1 ? '' : 's'} saved`);
+  };
+
+  document.getElementById('downloadWater').onclick = async function() {
+    if (waterZones.length === 0) return;
+    const placemarks = waterZones.map((z, i) =>
+      polygonToKmlPlacemark(leafletRingToLatLngs(z), `Water Exclusion ${i + 1}`, 'water')
+    );
+    const kml = buildKml('DFR Water Exclusions', placemarks, KMZ_STYLES.water);
+    await downloadKmz(`UASC_Water_Exclusions_${new Date().toISOString().slice(0,10)}.kmz`, kml);
+    setFooter(`${waterZones.length} water exclusion polygon${waterZones.length === 1 ? '' : 's'} saved`);
   };
 
   // ============ INCIDENTS CSV EXPORT ============
@@ -3196,6 +3382,26 @@
       ctx.setLineDash([]);
     }
 
+    function drawWaterPolygon(polygon) {
+      const rings = polygonRings(polygon);
+      ctx.beginPath();
+      for (const ring of rings) {
+        for (let i = 0; i < ring.length; i++) {
+          const p = ll2px(ring[i]);
+          if (i === 0) ctx.moveTo(p.x, p.y);
+          else ctx.lineTo(p.x, p.y);
+        }
+        ctx.closePath();
+      }
+      ctx.fillStyle = 'rgba(78, 167, 200, 0.14)';
+      ctx.fill('evenodd');
+      ctx.strokeStyle = '#4ea7c8';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     // 3a. Operational area
     if (areaPolygon) {
       drawPolygon(areaPolygon, null, '#dce6ef', false);
@@ -3211,7 +3417,12 @@
       drawPolygon(z, 'rgba(183, 156, 242, 0.12)', '#b79cf2', true);
     }
 
-    // 3d. Coverage circles (one per station). Compute pixel radius from a point
+    // 3d. Water exclusion zones (blue, dashed, translucent fill)
+    for (const z of waterZones) {
+      drawWaterPolygon(z);
+    }
+
+    // 3e. Coverage circles (one per station). Compute pixel radius from a point
     // at the station's lat/lng offset by the station radius in meters — we use
     // the meters-per-pixel ratio at the map's current zoom.
     if (stations.length > 0) {
@@ -3488,7 +3699,7 @@
         const t = (prioTargetsForPdf[cat.id] || 0) * 100;
         return `${cat.name.substring(0,8)} ${cat.kpiSec}s/${t.toFixed(0)}%`;
       }).join(' · ');
-      const profileLine = `Categories: ${targetsStr}   ·   Window: ${windowLabel}   ·   Service Time: ${kpi.serviceTimeMin}min   ·   Area: ${formatArea(areaKm2)}   ·   Incidents: ${incidents.length}   ·   No-Fly: ${noFlyZones.length}   ·   No-Deploy: ${noDeployZones.length}`;
+      const profileLine = `Categories: ${targetsStr}   ·   Window: ${windowLabel}   ·   Service Time: ${kpi.serviceTimeMin}min   ·   Area: ${formatArea(areaKm2)}   ·   Incidents: ${incidents.length}   ·   No-Fly: ${noFlyZones.length}   ·   No-Deploy: ${noDeployZones.length}   ·   Water: ${waterZones.length}`;
       pdf.text(profileLine, M, y);
       text(T.text);
       y += 4;
@@ -3529,6 +3740,7 @@
       if (areaPolygon) legendItems.push({ kind: 'line', color: '#dce6ef', label: 'Operational Area' });
       if (noFlyZones.length > 0) legendItems.push({ kind: 'fill', color: '#e38b95', label: 'No-Fly' });
       if (noDeployZones.length > 0) legendItems.push({ kind: 'fill', color: '#b79cf2', label: 'No-Deploy' });
+      if (waterZones.length > 0) legendItems.push({ kind: 'fill', color: '#4ea7c8', label: 'Water' });
       legendItems.push({ kind: 'station', color: '#dce6ef', label: 'Station' });
       for (const cat of incidentCategories) {
         legendItems.push({ kind: 'dot', color: cat.color, label: cat.name });

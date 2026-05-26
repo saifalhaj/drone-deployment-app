@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -17,11 +17,11 @@
       <img class="uasc-logo" id="uascLogoHeader" alt="UASC">
       <div>
         <h1>DFR Deployment Planner</h1>
-        <div class="sub">DFR Deployment Planning · Unmanned Aerial Systems Center · Dubai Police</div>
+        <div class="sub">DFR Deployment Planning Â· Unmanned Aerial Systems Center Â· Dubai Police</div>
       </div>
     </div>
     <div class="header-status">
-      <button class="about-btn" id="aboutBtn" title="About this tool">ⓘ About</button>
+      <button class="about-btn" id="aboutBtn" title="About this tool">â“˜ About</button>
       <div><span class="status-dot live" id="systemDot"></span>System Ready</div>
     </div>
   </header>
@@ -52,7 +52,7 @@
           <div class="field">
             <label class="field-label">Platform</label>
             <select id="minimizePreset">
-              <option value="custom" selected>Custom — enter manually</option>
+              <option value="custom" selected>Custom â€” enter manually</option>
             </select>
           </div>
           <div class="field-row">
@@ -68,7 +68,7 @@
           <div class="field">
             <label class="field-label">Service Time (min)</label>
             <input type="number" id="kpiServiceTime" value="15" min="1" max="180">
-            <div class="field-desc">One drone's busy time per call — recharge or swap <span class="field-desc-dim">(longer = more units needed for same demand)</span></div>
+            <div class="field-desc">One drone's busy time per call â€” recharge or swap <span class="field-desc-dim">(longer = more units needed for same demand)</span></div>
           </div>
           <div class="derived">
             <span>Effective Coverage Radius</span>
@@ -97,7 +97,7 @@
 
         <!-- FLEET MODE -->
         <div id="fleetPanel" style="display:none;">
-          <p class="help" style="margin-bottom: 8px;">Declare your fleet — name, coverage radius, count. The optimizer allocates across clusters to maximize coverage and minimize delayed incidents.</p>
+          <p class="help" style="margin-bottom: 8px;">Declare your fleet â€” name, coverage radius, count. The optimizer allocates across clusters to maximize coverage and minimize delayed incidents.</p>
           <div class="fleet-list" id="fleetList"></div>
           <button class="btn btn-secondary" id="addTypeBtn">+ Add Drone Type</button>
           <div class="fleet-summary" id="fleetSummary"><strong>0</strong> drones across <strong>0</strong> types</div>
@@ -120,15 +120,15 @@
         <div class="area-method-panel" id="areaMethodDraw">
         <p class="help" style="font-size: 11px;">Manually draw the operational area on the map.</p>
         <div class="field-row" style="margin-bottom: 6px;">
-          <button class="btn btn-secondary draw-btn" id="drawRectBtn">▭&nbsp; Rectangle</button>
-          <button class="btn btn-secondary draw-btn" id="drawPolyBtn">⬠&nbsp; Polygon</button>
+          <button class="btn btn-secondary draw-btn" id="drawRectBtn">â–­&nbsp; Rectangle</button>
+          <button class="btn btn-secondary draw-btn" id="drawPolyBtn">â¬ &nbsp; Polygon</button>
         </div>
         </div>
         <div class="area-method-panel hidden" id="areaMethodUpload">
         <p class="help" style="font-size: 11px;">Upload an existing operational area from KML, KMZ, GeoJSON, or JSON.</p>
         <div class="upload-area-action">
           <label class="btn btn-secondary upload-area-btn">
-            ⬆&nbsp; Upload KML / KMZ / GeoJSON
+            â¬†&nbsp; Upload KML / KMZ / GeoJSON
             <input type="file" id="areaFileInput" accept=".kml,.kmz,.geojson,.json" style="display:none;">
           </label>
         </div>
@@ -157,43 +157,61 @@
         <div class="status-line" id="boundaryStatus">Online source: geoBoundaries open administrative boundaries</div>
         </div>
 
-        <button class="btn btn-ghost" id="downloadArea" disabled style="margin-bottom: 6px;">⬇ Save KMZ</button>
+        <button class="btn btn-ghost" id="downloadArea" disabled style="margin-bottom: 6px;">â¬‡ Save KMZ</button>
         <button class="btn btn-ghost" id="clearArea" style="margin-bottom: 4px;">Clear Area</button>
         <div class="status-line" id="status1">Awaiting area selection</div>
 
         <div class="subsection-label" style="margin-top: 14px;">
           <span><span class="layer-swatch" style="background:#e38b95;"></span> No-Fly Zones</span>
-          <span class="hint">drones can't cross · excludes incidents</span>
+          <span class="hint">drones can't cross Â· excludes incidents</span>
         </div>
         <div class="field-row" style="margin-bottom: 6px;">
-          <button class="btn btn-secondary draw-btn" id="drawNoFlyBtn">⬠&nbsp; Draw</button>
+          <button class="btn btn-secondary draw-btn" id="drawNoFlyBtn">â¬ &nbsp; Draw</button>
           <label class="btn btn-secondary" style="text-align:center;cursor:pointer;">
-            ⬆&nbsp; Upload
+            â¬†&nbsp; Upload
             <input type="file" id="noFlyFileInput" accept=".kml,.kmz,.geojson,.json" style="display:none;">
           </label>
         </div>
         <div class="field-row" style="margin-bottom: 6px;">
           <button class="btn btn-ghost" id="clearNoFly">Clear All</button>
-          <button class="btn btn-ghost" id="downloadNoFly" disabled>⬇ Save KMZ</button>
+          <button class="btn btn-ghost" id="downloadNoFly" disabled>â¬‡ Save KMZ</button>
         </div>
         <div class="status-line" id="statusNoFly">No no-fly zones</div>
 
         <div class="subsection-label" style="margin-top: 14px;">
           <span><span class="layer-swatch" style="background:#b79cf2;"></span> No-Deploy Zones</span>
-          <span class="hint">stations not allowed · drones may fly</span>
+          <span class="hint">stations not allowed Â· drones may fly</span>
         </div>
         <div class="field-row" style="margin-bottom: 6px;">
-          <button class="btn btn-secondary draw-btn" id="drawNoDeployBtn">⬠&nbsp; Draw</button>
+          <button class="btn btn-secondary draw-btn" id="drawNoDeployBtn">â¬ &nbsp; Draw</button>
           <label class="btn btn-secondary" style="text-align:center;cursor:pointer;">
-            ⬆&nbsp; Upload
+            â¬†&nbsp; Upload
             <input type="file" id="noDeployFileInput" accept=".kml,.kmz,.geojson,.json" style="display:none;">
           </label>
         </div>
         <div class="field-row" style="margin-bottom: 6px;">
           <button class="btn btn-ghost" id="clearNoDeploy">Clear All</button>
-          <button class="btn btn-ghost" id="downloadNoDeploy" disabled>⬇ Save KMZ</button>
+          <button class="btn btn-ghost" id="downloadNoDeploy" disabled>â¬‡ Save KMZ</button>
         </div>
         <div class="status-line" id="statusNoDeploy">No no-deploy zones</div>
+
+        <div class="subsection-label" style="margin-top: 14px;">
+          <span><span class="layer-swatch" style="background:#4ea7c8;"></span> Water Exclusion</span>
+          <span class="hint">stations not allowed over water</span>
+        </div>
+        <p class="help" style="font-size: 11px;">Upload water polygons from Natural Earth, OpenStreetMap/Geofabrik, or local hydrography data. These areas only block station placement.</p>
+        <div class="field-row" style="margin-bottom: 6px;">
+          <button class="btn btn-secondary" id="loadNaturalEarthWater">Load Built-in Water</button>
+          <label class="btn btn-secondary" style="text-align:center;cursor:pointer;">
+            Upload Water Layer
+            <input type="file" id="waterFileInput" accept=".kml,.kmz,.geojson,.json" style="display:none;">
+          </label>
+        </div>
+        <div class="field-row" style="margin-bottom: 6px;">
+          <button class="btn btn-ghost" id="clearWater">Clear All</button>
+          <button class="btn btn-ghost" id="downloadWater" disabled>Save KMZ</button>
+        </div>
+        <div class="status-line" id="statusWater">No water exclusions</div>
       </div>
 
       <div class="panel" id="panel2">
@@ -216,7 +234,7 @@
 
         <div class="subsection-label" style="margin-top: 14px;">
           Incident KPIs
-          <span class="hint">name · KPI · overhead · target · weight</span>
+          <span class="hint">name Â· KPI Â· overhead Â· target Â· weight</span>
         </div>
         <p class="help" style="font-size: 11px; line-height: 1.45;">One row per incident class. Each category has its own response-time KPI and service-level target; the optimizer sizes each cluster to meet all targets simultaneously. Weight drives both auto-generation probability and the greedy priority of geographic siting.</p>
         <div id="categoriesList" class="categories-list"></div>
@@ -245,7 +263,7 @@
           <p class="help" style="margin-top: 8px; font-size: 11px;">Probability of each category is driven by the <strong>Weight</strong> field in the Incident KPIs section above.</p>
           <div class="field-row" style="gap: 6px;">
             <button class="btn btn-primary" id="generateBtn" disabled>Generate Incidents</button>
-            <button class="btn btn-secondary" id="downloadGeneratedBtn" disabled title="Download the generated incidents as CSV — same format the upload parser reads">⬇ Download CSV</button>
+            <button class="btn btn-secondary" id="downloadGeneratedBtn" disabled title="Download the generated incidents as CSV â€” same format the upload parser reads">â¬‡ Download CSV</button>
           </div>
         </div>
 
@@ -255,7 +273,7 @@
             Optional <code>category</code> column (also accepts <code>priority</code>, <code>severity</code>, <code>class</code>): matched by name to your defined categories. Unrecognized values default to the first category.
           </p>
           <label class="btn btn-secondary" style="text-align:center;cursor:pointer;display:block;">
-            ⬆&nbsp; Choose CSV or Excel
+            â¬†&nbsp; Choose CSV or Excel
             <input type="file" id="incidentFileInput" accept=".csv,.xlsx,.xls" style="display:none;">
           </label>
         </div>
@@ -265,49 +283,49 @@
         <div id="incidentStatsBlock" class="stats-block" style="display:none;">
           <div class="stats-header">
             <span>Incident Statistics</span>
-            <button class="btn btn-ghost btn-inline" id="exportIncidentsBtn">⬇ Export CSV</button>
+            <button class="btn btn-ghost btn-inline" id="exportIncidentsBtn">â¬‡ Export CSV</button>
           </div>
           <p class="stats-blurb">What the optimizer is actually working with. Use these to sanity-check your data before computing the deployment.</p>
 
           <div class="stats-grid">
             <div class="stat-cell">
               <div class="stat-label">Total Incidents</div>
-              <div class="stat-value" id="stat-total">—</div>
+              <div class="stat-value" id="stat-total">â€”</div>
               <div class="stat-desc">After area + zone filtering</div>
             </div>
             <div class="stat-cell">
               <div class="stat-label">Time Span</div>
-              <div class="stat-value" id="stat-span">—</div>
+              <div class="stat-value" id="stat-span">â€”</div>
               <div class="stat-desc" id="stat-span-desc">Window the data covers</div>
             </div>
             <div class="stat-cell">
               <div class="stat-label">Average Rate</div>
-              <div class="stat-value" id="stat-rate">—</div>
+              <div class="stat-value" id="stat-rate">â€”</div>
               <div class="stat-desc">Mean arrival rate over the span</div>
             </div>
             <div class="stat-cell">
               <div class="stat-label">Median Interval</div>
-              <div class="stat-value" id="stat-interval">—</div>
+              <div class="stat-value" id="stat-interval">â€”</div>
               <div class="stat-desc">Time between consecutive incidents</div>
             </div>
             <div class="stat-cell stat-cell-wide">
               <div class="stat-label">Busiest Period</div>
-              <div class="stat-value" id="stat-peak">—</div>
+              <div class="stat-value" id="stat-peak">â€”</div>
               <div class="stat-desc">When the highest concentration of incidents occurred</div>
             </div>
             <div class="stat-cell">
               <div class="stat-label">Peak Concurrent</div>
-              <div class="stat-value" id="stat-concurrent">—</div>
+              <div class="stat-value" id="stat-concurrent">â€”</div>
               <div class="stat-desc">Max simultaneous active incidents (drives unit sizing)</div>
             </div>
             <div class="stat-cell">
               <div class="stat-label">Day / Night Split</div>
-              <div class="stat-value" id="stat-daynight">—</div>
-              <div class="stat-desc">06:00–18:00 vs 18:00–06:00 mix</div>
+              <div class="stat-value" id="stat-daynight">â€”</div>
+              <div class="stat-desc">06:00â€“18:00 vs 18:00â€“06:00 mix</div>
             </div>
             <div class="stat-cell">
               <div class="stat-label">Geographic Spread</div>
-              <div class="stat-value" id="stat-spread">—</div>
+              <div class="stat-value" id="stat-spread">â€”</div>
               <div class="stat-desc">Diagonal extent of incident bounding box</div>
             </div>
           </div>
@@ -329,7 +347,7 @@
           <span class="step-tag">STEP 03</span>
           <span class="panel-title">Compute Deployment</span>
         </div>
-        <p class="help">Runs the time-aware optimizer using your Mission and Toolkit settings, area, and incident pattern. Stations are sized to handle observed concurrent demand — not just average load.</p>
+        <p class="help">Runs the time-aware optimizer using your Mission and Toolkit settings, area, and incident pattern. Stations are sized to handle observed concurrent demand â€” not just average load.</p>
         <button class="btn btn-primary" id="optimizeBtn" disabled>Compute Deployment</button>
         <div class="status-line" id="status3">No deployment computed</div>
       </div>
@@ -342,27 +360,27 @@
         <div class="metrics-grid">
           <div class="metric">
             <div class="metric-label">Area</div>
-            <div class="metric-value" id="m-area">—<span class="metric-unit"></span></div>
+            <div class="metric-value" id="m-area">â€”<span class="metric-unit"></span></div>
           </div>
           <div class="metric">
             <div class="metric-label">Incidents</div>
-            <div class="metric-value" id="m-incidents">—</div>
+            <div class="metric-value" id="m-incidents">â€”</div>
           </div>
           <div class="metric">
             <div class="metric-label">Sites</div>
-            <div class="metric-value" id="m-stations">—</div>
+            <div class="metric-value" id="m-stations">â€”</div>
           </div>
           <div class="metric highlight">
             <div class="metric-label">DroneBox Units</div>
-            <div class="metric-value" id="m-units">—</div>
+            <div class="metric-value" id="m-units">â€”</div>
           </div>
           <div class="metric coverage-metric">
             <div class="metric-label">Geographic Cov.</div>
-            <div class="metric-value" id="m-coverage">—</div>
+            <div class="metric-value" id="m-coverage">â€”</div>
           </div>
           <div class="metric coverage-metric">
             <div class="metric-label">KPI Compliance</div>
-            <div class="metric-value" id="m-kpi">—</div>
+            <div class="metric-value" id="m-kpi">â€”</div>
           </div>
         </div>
 
@@ -384,7 +402,7 @@
   </main>
 
   <footer>
-    <div>Greedy Maximum-Coverage Location Solver · Haversine Distance Model</div>
+    <div>Greedy Maximum-Coverage Location Solver Â· Haversine Distance Model</div>
     <div id="footerStatus">Idle</div>
   </footer>
 </div>
@@ -402,7 +420,7 @@
   <div class="upload-modal-card">
     <div class="upload-modal-header">
       <span>Confirm Upload</span>
-      <button class="upload-modal-close" id="uploadPreviewCancel" aria-label="Close">×</button>
+      <button class="upload-modal-close" id="uploadPreviewCancel" aria-label="Close">Ã—</button>
     </div>
     <div class="upload-modal-body">
       <p class="upload-modal-blurb" id="uploadPreviewBlurb"></p>
@@ -420,7 +438,7 @@
     </div>
     <div class="upload-modal-footer">
       <button class="btn btn-ghost" id="uploadPreviewCancelBtn">Cancel</button>
-      <button class="btn btn-primary" id="uploadPreviewAccept">Looks Right · Import</button>
+      <button class="btn btn-primary" id="uploadPreviewAccept">Looks Right Â· Import</button>
     </div>
   </div>
 </div>
@@ -434,7 +452,7 @@
         <span class="step-dot" id="aboutStepLabel">ABOUT</span>
         <span id="aboutTitleText">DFR Deployment Planner</span>
       </div>
-      <button class="about-close" id="aboutClose" aria-label="Close">×</button>
+      <button class="about-close" id="aboutClose" aria-label="Close">Ã—</button>
     </div>
 
     <div class="about-body" id="aboutBody">
@@ -531,7 +549,7 @@
         </div>
         <div>
           <div class="about-eyebrow" style="margin-bottom: 6px;">HONEST LIMITS</div>
-          <p class="muted" style="margin-top: 0;">Straight-line paths · constant mission duration · no weather downtime. Use real flight logs to calibrate before procurement.</p>
+          <p class="muted" style="margin-top: 0;">Straight-line paths Â· constant mission duration Â· no weather downtime. Use real flight logs to calibrate before procurement.</p>
         </div>
       </div>
 
@@ -549,7 +567,7 @@
           <p class="about-closing">The future of DFR should not depend on guesswork. It should be planned, measured, and built around the communities it is meant to serve.</p>
           <div class="signature">
             Built by the Autonomous Systems Center<br>
-            مركز أنظمة الطائرات المسيرة · شرطة دبي
+            Ù…Ø±ÙƒØ² Ø£Ù†Ø¸Ù…Ø© Ø§Ù„Ø·Ø§Ø¦Ø±Ø§Øª Ø§Ù„Ù…Ø³ÙŠØ±Ø© Â· Ø´Ø±Ø·Ø© Ø¯Ø¨ÙŠ
           </div>
         </div>
       </div>
@@ -564,8 +582,8 @@
       </div>
       <span class="about-page-counter" id="aboutPageCounter">1 / 3</span>
       <div class="about-nav">
-        <button id="aboutPrev" disabled>← Back</button>
-        <button class="primary" id="aboutNext">Next →</button>
+        <button id="aboutPrev" disabled>â† Back</button>
+        <button class="primary" id="aboutNext">Next â†’</button>
       </div>
     </div>
   </div>
@@ -573,3 +591,4 @@
 
 </body>
 </html>
+
