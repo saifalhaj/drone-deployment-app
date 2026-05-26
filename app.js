@@ -47,6 +47,9 @@
   let noDeployZones = [];  // L.polygon[] — stations cannot be placed inside (drones may fly through)
   let incidents = [];
   let stations = [];
+  let unitSystem = 'metric';
+  let coordFormat = 'decimal';
+  let boundaryFeatures = [];
 
   // ============ UTILITIES ============
   function haversine(a, b) {
@@ -297,7 +300,55 @@
       const text = await file.text();
       return parseKMLText(text);
     }
-    throw new Error('Unsupported file type — KML or KMZ only');
+    if (name.endsWith('.geojson') || name.endsWith('.json')) {
+      const geo = JSON.parse(await file.text());
+      const features = geo.type === 'FeatureCollection' ? geo.features : [geo];
+      return features.map(chooseLargestRing).filter(Boolean);
+    }
+    throw new Error('Unsupported file type — KML, KMZ, GeoJSON, or JSON only');
+  }
+
+  function geoJsonRingToLatLngs(ring) {
+    if (!Array.isArray(ring)) return [];
+    return ring.map(coord => ({ lat: coord[1], lng: coord[0] }))
+      .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  }
+
+  function geoJsonFeatureToRings(feature) {
+    const geom = feature && feature.geometry;
+    if (!geom) return [];
+    if (geom.type === 'Polygon') return geom.coordinates.map(geoJsonRingToLatLngs).filter(r => r.length >= 3);
+    if (geom.type === 'MultiPolygon') {
+      return geom.coordinates.flatMap(poly => poly.map(geoJsonRingToLatLngs)).filter(r => r.length >= 3);
+    }
+    return [];
+  }
+
+  function ringAreaApprox(ring) {
+    if (!ring || ring.length < 3) return 0;
+    let area = 0;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      area += (ring[j].lng + ring[i].lng) * (ring[j].lat - ring[i].lat);
+    }
+    return Math.abs(area);
+  }
+
+  function chooseLargestRing(feature) {
+    return geoJsonFeatureToRings(feature).sort((a, b) => ringAreaApprox(b) - ringAreaApprox(a))[0] || null;
+  }
+
+  function boundaryName(feature, fallback) {
+    const p = feature.properties || {};
+    return p.shapeName || p.shapeNameLocal || p.shapeISO || p.NAME || p.name || p.NAME_1 || p.NAME_2 || fallback || 'Boundary';
+  }
+
+  function normalizeGeoJsonUrl(url) {
+    if (!url) return url;
+    const githubRaw = url.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/raw\/(.+)$/);
+    if (githubRaw) {
+      return `https://media.githubusercontent.com/media/${githubRaw[1]}/${githubRaw[2]}/${githubRaw[3]}`;
+    }
+    return url;
   }
 
   function polygonAreaKm2(polygon) {
@@ -314,6 +365,100 @@
       total += (lng2 - lng1) * (2 + Math.sin(lat1) + Math.sin(lat2));
     }
     return Math.abs(total * R * R / 2);
+  }
+
+  function formatDistance(meters, precision) {
+    if (unitSystem === 'imperial') {
+      const feet = meters * 3.28084;
+      if (feet < 5280) return feet.toFixed(0) + ' ft';
+      const miles = meters / 1609.344;
+      return miles.toFixed(precision == null ? 2 : precision) + ' mi';
+    }
+    if (meters >= 1000) return (meters / 1000).toFixed(precision == null ? 2 : precision) + ' km';
+    return meters.toFixed(0) + ' m';
+  }
+
+  function formatArea(km2, precision) {
+    if (unitSystem === 'imperial') {
+      return (km2 * 0.386102).toFixed(precision == null ? 2 : precision) + ' mi²';
+    }
+    return km2.toFixed(precision == null ? 2 : precision) + ' km²';
+  }
+
+  function formatCoordValue(value, positive, negative) {
+    const hemi = value >= 0 ? positive : negative;
+    const abs = Math.abs(value);
+    const deg = Math.floor(abs);
+    const minutesFloat = (abs - deg) * 60;
+    const min = Math.floor(minutesFloat);
+    const sec = (minutesFloat - min) * 60;
+    return `${deg}°${min}'${sec.toFixed(2)}"${hemi}`;
+  }
+
+  function latLngToUtm(lat, lng) {
+    const a = 6378137;
+    const f = 1 / 298.257223563;
+    const k0 = 0.9996;
+    const e = Math.sqrt(f * (2 - f));
+    const zone = Math.floor((lng + 180) / 6) + 1;
+    const lon0 = ((zone - 1) * 6 - 180 + 3) * Math.PI / 180;
+    const phi = lat * Math.PI / 180;
+    const lambda = lng * Math.PI / 180;
+    const n = a / Math.sqrt(1 - e * e * Math.sin(phi) ** 2);
+    const t = Math.tan(phi) ** 2;
+    const c = (e * e / (1 - e * e)) * Math.cos(phi) ** 2;
+    const A = Math.cos(phi) * (lambda - lon0);
+    const m = a * (
+      (1 - e * e / 4 - 3 * e ** 4 / 64 - 5 * e ** 6 / 256) * phi
+      - (3 * e * e / 8 + 3 * e ** 4 / 32 + 45 * e ** 6 / 1024) * Math.sin(2 * phi)
+      + (15 * e ** 4 / 256 + 45 * e ** 6 / 1024) * Math.sin(4 * phi)
+      - (35 * e ** 6 / 3072) * Math.sin(6 * phi)
+    );
+    let easting = k0 * n * (A + (1 - t + c) * A ** 3 / 6 + (5 - 18 * t + t * t + 72 * c - 58 * e * e / (1 - e * e)) * A ** 5 / 120) + 500000;
+    let northing = k0 * (m + n * Math.tan(phi) * (A * A / 2 + (5 - t + 9 * c + 4 * c * c) * A ** 4 / 24 + (61 - 58 * t + t * t + 600 * c - 330 * e * e / (1 - e * e)) * A ** 6 / 720));
+    if (lat < 0) northing += 10000000;
+    return `${zone}${lat >= 0 ? 'N' : 'S'} ${Math.round(easting)}E ${Math.round(northing)}N`;
+  }
+
+  function formatCoordinate(lat, lng) {
+    if (coordFormat === 'dms') {
+      return `${formatCoordValue(lat, 'N', 'S')}, ${formatCoordValue(lng, 'E', 'W')}`;
+    }
+    if (coordFormat === 'utm') return latLngToUtm(lat, lng);
+    return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  }
+
+  function inputSpeedToMs(value) {
+    const n = parseFloat(value);
+    if (!Number.isFinite(n)) return 0;
+    return unitSystem === 'imperial' ? n * 0.44704 : n;
+  }
+
+  function inputRadiusToM(value) {
+    const n = parseFloat(value);
+    if (!Number.isFinite(n)) return 0;
+    return unitSystem === 'imperial' ? n * 0.3048 : n;
+  }
+
+  function convertMinimizeInputs(fromUnits, toUnits) {
+    if (fromUnits === toUnits) return;
+    const speedInput = document.getElementById('droneSpeed');
+    const radiusInput = document.getElementById('manualRadius');
+    if (speedInput && speedInput.value) {
+      const ms = fromUnits === 'imperial' ? parseFloat(speedInput.value) * 0.44704 : parseFloat(speedInput.value);
+      speedInput.value = toUnits === 'imperial' ? (ms / 0.44704).toFixed(1) : ms.toFixed(1);
+    }
+    if (radiusInput && radiusInput.value) {
+      const m = fromUnits === 'imperial' ? parseFloat(radiusInput.value) * 0.3048 : parseFloat(radiusInput.value);
+      radiusInput.value = toUnits === 'imperial' ? Math.round(m / 0.3048) : Math.round(m);
+    }
+  }
+
+  function updateLocalizationLabels() {
+    const speedLabel = document.getElementById('droneSpeedLabel');
+    const radiusLabel = document.getElementById('manualRadiusLabel');
+    if (speedLabel) speedLabel.textContent = unitSystem === 'imperial' ? 'Speed (mph)' : 'Speed (m/s)';
+    if (radiusLabel) radiusLabel.textContent = unitSystem === 'imperial' ? 'Radius (ft)' : 'Radius (m)';
   }
 
   function gaussianRandom() {
@@ -1084,7 +1229,7 @@
 
     // Speed used to convert each category's effective fly-time into a radius.
     // Driven by the platform speed input; falls back to a sensible default.
-    const speedMs = (parseFloat(document.getElementById('droneSpeed').value) || 15);
+    const speedMs = inputSpeedToMs(document.getElementById('droneSpeed').value) || 15;
     // Per-incident radius: each incident gets its own circle based on its category.
     // This is the core of per-category-radii optimization.
     const incRadius = new Float32Array(n);
@@ -1291,7 +1436,7 @@
       });
 
       const typeName = s.typeName || 'DFR Station';
-      const radiusLabel = radius >= 1000 ? (radius / 1000).toFixed(2) + ' km' : radius.toFixed(0) + ' m';
+      const radiusLabel = formatDistance(radius);
       const svc = (s.achievedServiceLevel != null) ? (s.achievedServiceLevel * 100).toFixed(1) + '%' : '—';
       // Per-category breakdown
       let prioBreakdown = '';
@@ -1316,7 +1461,7 @@
         `Radius: ${radiusLabel}<br>` +
         (s.serviceTimeMin != null ? `Cycle time: ${s.serviceTimeMin} min<br>` : '') +
         `Overall service level: ${svc}<br>` +
-        `${s.lat.toFixed(5)}, ${s.lng.toFixed(5)}`;
+        formatCoordinate(s.lat, s.lng);
       L.marker([s.lat, s.lng], { icon }).bindPopup(popup).addTo(stationLayer);
     });
   }
@@ -1442,6 +1587,28 @@
     handleAreaCreated(rect);
   }
 
+  function setAreaMethod(method) {
+    document.querySelectorAll('.area-method-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.areaMethod === method);
+    });
+    [
+      ['draw', 'areaMethodDraw'],
+      ['upload', 'areaMethodUpload'],
+      ['boundary', 'areaMethodBoundary']
+    ].forEach(([name, id]) => {
+      const panel = document.getElementById(id);
+      if (panel) panel.classList.toggle('hidden', name !== method);
+    });
+    if (method !== 'draw' && drawMode) exitDrawing();
+    if (method === 'boundary') scheduleBoundaryCountryLoad();
+  }
+
+  document.querySelectorAll('.area-method-tab').forEach(btn => {
+    btn.onclick = function() {
+      setAreaMethod(this.dataset.areaMethod);
+    };
+  });
+
   document.getElementById('drawRectBtn').onclick = function() {
     if (drawMode === 'rectangle') exitDrawing();
     else startDrawing('rectangle');
@@ -1463,7 +1630,7 @@
     areaLayer.addLayer(areaPolygon);
 
     const km2 = polygonAreaKm2(areaPolygon);
-    document.getElementById('m-area').innerHTML = km2.toFixed(2) + '<span class="metric-unit">km²</span>';
+    document.getElementById('m-area').innerHTML = formatArea(km2);
     document.getElementById('m-incidents').textContent = '—';
     document.getElementById('m-stations').textContent = '—';
     document.getElementById('m-coverage').textContent = '—';
@@ -1476,7 +1643,7 @@
     document.getElementById('generateBtn').disabled = false;
     document.getElementById('optimizeBtn').disabled = true;
 
-    document.getElementById('status1').textContent = `Area defined · ${km2.toFixed(2)} km²`;
+    document.getElementById('status1').textContent = `Area defined · ${formatArea(km2)}`;
     document.getElementById('status1').classList.add('good');
     document.getElementById('status2').textContent = 'Ready to generate';
     document.getElementById('status2').classList.remove('good');
@@ -1486,6 +1653,30 @@
     if (dlArea) dlArea.disabled = false;
     setFooter('Area defined');
   }
+
+  function refreshLocalizedOutputs() {
+    updateRadius();
+    if (areaPolygon) {
+      const km2 = polygonAreaKm2(areaPolygon);
+      document.getElementById('m-area').innerHTML = formatArea(km2);
+      document.getElementById('status1').textContent = `Area defined · ${formatArea(km2)}`;
+    }
+    if (stations.length > 0) renderStations(stations);
+    if (incidents.length > 0) updateIncidentStats(window.__lastIncidentStatsMeta || null);
+  }
+
+  document.getElementById('unitSystem').onchange = function() {
+    const previous = unitSystem;
+    unitSystem = this.value;
+    convertMinimizeInputs(previous, unitSystem);
+    updateLocalizationLabels();
+    refreshLocalizedOutputs();
+  };
+
+  document.getElementById('coordFormat').onchange = function() {
+    coordFormat = this.value;
+    refreshLocalizedOutputs();
+  };
 
   document.getElementById('clearArea').onclick = function() {
     resetAll();
@@ -1531,13 +1722,13 @@
   };
 
   function updateRadius() {
-    const manual = parseFloat(document.getElementById('manualRadius').value);
+    const manual = inputRadiusToM(document.getElementById('manualRadius').value);
     let radius, isManual;
     if (manual && manual > 0) {
       radius = manual;
       isManual = true;
     } else {
-      const speed = parseFloat(document.getElementById('droneSpeed').value);
+      const speed = inputSpeedToMs(document.getElementById('droneSpeed').value);
       // Use the strictest EFFECTIVE fly-time across all categories. Overhead
       // (dock-open + sensor warmup + launch + climb) is subtracted from each
       // category's raw KPI so the radius reflects what the drone can actually
@@ -1546,7 +1737,7 @@
       radius = speed * time;
       isManual = false;
     }
-    const display = radius >= 1000 ? (radius / 1000).toFixed(2) + ' km' : radius.toFixed(0) + ' m';
+    const display = formatDistance(radius);
     const el = document.getElementById('radiusDisplay');
     if (el) {
       const overheadNote = isManual ? ' (manual)' : ` (after ${getMaxOverheadSec()}s overhead)`;
@@ -1575,6 +1766,7 @@
   }
   document.getElementById('droneSpeed').oninput = function() { dropPresetToCustom(); updateRadius(); };
   document.getElementById('manualRadius').oninput = function() { dropPresetToCustom(); updateRadius(); };
+  updateLocalizationLabels();
   updateRadius();
 
   document.getElementById('optimizeBtn').onclick = function() {
@@ -1751,7 +1943,7 @@
         weight: c.weight
       })),
       parameters: optMode === 'minimize' ? {
-        drone_speed_mps: parseFloat(document.getElementById('droneSpeed').value),
+        drone_speed_mps: inputSpeedToMs(document.getElementById('droneSpeed').value),
         coverage_radius_m: updateRadius(),
         incident_count: incidents.length,
         distribution: document.getElementById('patternMode').value
@@ -1913,13 +2105,13 @@
 
   function modeToggle(mode) {
     optMode = mode;
-    document.querySelectorAll('.mode-tab').forEach(t => {
+    document.querySelectorAll('.mode-tab[data-mode]').forEach(t => {
       t.classList.toggle('active', t.dataset.mode === mode);
     });
     document.getElementById('minimizePanel').style.display = (mode === 'minimize') ? 'block' : 'none';
     document.getElementById('fleetPanel').style.display = (mode === 'fleet') ? 'block' : 'none';
   }
-  document.querySelectorAll('.mode-tab').forEach(t => {
+  document.querySelectorAll('.mode-tab[data-mode]').forEach(t => {
     t.onclick = () => modeToggle(t.dataset.mode);
   });
 
@@ -2086,10 +2278,10 @@
       }
       const preset = DRONE_CATALOG.find(p => p.id === id);
       if (!preset) return;
-      // Catalog speed is km/h; minimize panel uses m/s
+      // Catalog speed is stored as km/h; minimize panel displays localized speed.
       const speedMs = (preset.speedKmh * 1000 / 3600);
-      speedInput.value = speedMs.toFixed(1);
-      radiusInput.value = preset.radius;
+      speedInput.value = unitSystem === 'imperial' ? (speedMs / 0.44704).toFixed(1) : speedMs.toFixed(1);
+      radiusInput.value = unitSystem === 'imperial' ? Math.round(preset.radius / 0.3048) : preset.radius;
       if (cycleEl) cycleEl.value = preset.serviceTimeMin;
       if (noteEl) noteEl.textContent = preset.notes || '';
       updateRadius();
@@ -2365,6 +2557,336 @@
     clearAllNoDeployZones();
     setFooter('No-deploy zones cleared');
   };
+
+  // ============ ONLINE BOUNDARY LIBRARY ============
+  async function loadBoundaryCatalog() {
+    const iso = (document.getElementById('boundaryIso').value || '').trim().toUpperCase();
+    const level = document.getElementById('boundaryLevel').value;
+    const status = document.getElementById('boundaryStatus');
+    const select = document.getElementById('boundarySelect');
+    const applyBtn = document.getElementById('applyBoundaryBtn');
+    if (!/^[A-Z]{3}$/.test(iso)) {
+      status.textContent = 'Enter a 3-letter ISO country code, for example ARE, USA, GBR, FRA.';
+      status.classList.remove('good');
+      return;
+    }
+
+    status.textContent = `Loading ${iso} ${level} boundaries...`;
+    status.classList.remove('good');
+    select.disabled = true;
+    applyBtn.disabled = true;
+    select.innerHTML = '<option value="">Loading...</option>';
+
+    const metaUrl = `https://www.geoboundaries.org/api/current/gbOpen/${iso}/${level}/`;
+    const metaRes = await fetch(metaUrl);
+    if (!metaRes.ok) throw new Error(`geoBoundaries returned HTTP ${metaRes.status}`);
+    const meta = await metaRes.json();
+    const geoJsonUrl = normalizeGeoJsonUrl(meta.gjDownloadURL || meta.geoJSON || meta.simplifiedGeometryGeoJSON);
+    if (!geoJsonUrl) throw new Error('No GeoJSON download URL found for this boundary set');
+
+    const geoRes = await fetch(geoJsonUrl);
+    if (!geoRes.ok) throw new Error(`Boundary download returned HTTP ${geoRes.status}`);
+    const geo = await geoRes.json();
+    boundaryFeatures = geo.type === 'FeatureCollection' ? geo.features : [geo];
+    boundaryFeatures = boundaryFeatures.filter(f => chooseLargestRing(f));
+    boundaryFeatures.sort((a, b) => boundaryName(a).localeCompare(boundaryName(b)));
+
+    select.innerHTML = '';
+    boundaryFeatures.forEach((feature, index) => {
+      const opt = document.createElement('option');
+      opt.value = String(index);
+      opt.textContent = boundaryName(feature, `${level} ${index + 1}`);
+      select.appendChild(opt);
+    });
+
+    if (boundaryFeatures.length === 0) {
+      select.innerHTML = '<option value="">No polygon boundaries found</option>';
+      status.textContent = 'No polygon boundaries found for this country and level.';
+      return;
+    }
+
+    select.disabled = false;
+    applyBtn.disabled = false;
+    status.textContent = `${boundaryFeatures.length} boundaries loaded from geoBoundaries.`;
+    status.classList.add('good');
+  }
+
+  const legacyLoadBoundaryBtn = document.getElementById('loadBoundaryBtn');
+  if (legacyLoadBoundaryBtn) legacyLoadBoundaryBtn.onclick = async function() {
+    try {
+      await loadBoundaryCatalog();
+    } catch (err) {
+      console.error(err);
+      const status = document.getElementById('boundaryStatus');
+      status.textContent = 'Boundary load failed: ' + err.message;
+      status.classList.remove('good');
+    }
+  };
+
+  document.getElementById('applyBoundaryBtn').onclick = function() {
+    const select = document.getElementById('boundarySelect');
+    const feature = boundaryFeatures[parseInt(select.value, 10)];
+    const ring = chooseLargestRing(feature);
+    if (!ring) return;
+    const layer = L.polygon(ring.map(pt => [pt.lat, pt.lng]), { color: '#dce6ef', weight: 2, fillOpacity: 0.05 });
+    handleAreaCreated(layer);
+    map.fitBounds(layer.getBounds(), { padding: [20, 20] });
+    const name = boundaryName(feature);
+    document.getElementById('status1').textContent += ` · ${name}`;
+    setFooter('Operational area loaded: ' + name);
+  };
+
+  let boundaryCountries = [
+    { name: 'United Arab Emirates', iso: 'ARE' },
+    { name: 'United States', iso: 'USA' },
+    { name: 'United Kingdom', iso: 'GBR' },
+    { name: 'Saudi Arabia', iso: 'SAU' },
+    { name: 'Qatar', iso: 'QAT' },
+    { name: 'Oman', iso: 'OMN' },
+    { name: 'Bahrain', iso: 'BHR' },
+    { name: 'Kuwait', iso: 'KWT' },
+    { name: 'France', iso: 'FRA' },
+    { name: 'Germany', iso: 'DEU' },
+    { name: 'India', iso: 'IND' },
+    { name: 'Australia', iso: 'AUS' },
+    { name: 'Canada', iso: 'CAN' }
+  ];
+  let boundaryCountryFeature = null;
+  let boundaryCityFeatures = [];
+  let boundaryDistrictFeatures = [];
+  let boundaryLoadTimer = null;
+  let boundaryLoadedIso = '';
+
+  function populateCountryList() {
+    const list = document.getElementById('boundaryCountryList');
+    if (!list) return;
+    list.innerHTML = '';
+    boundaryCountries.slice().sort((a, b) => a.name.localeCompare(b.name)).forEach(country => {
+      const opt = document.createElement('option');
+      opt.value = `${country.name} (${country.iso})`;
+      list.appendChild(opt);
+    });
+  }
+
+  async function loadCountryList() {
+    populateCountryList();
+    try {
+      const res = await fetch('https://restcountries.com/v3.1/all?fields=name,cca3');
+      if (!res.ok) return;
+      const countries = await res.json();
+      boundaryCountries = countries
+        .filter(c => c.cca3 && c.name && c.name.common)
+        .map(c => ({ name: c.name.common, iso: c.cca3 }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      populateCountryList();
+    } catch (err) {
+      console.warn('Country list fallback in use', err);
+    }
+  }
+
+  function selectedCountryIso() {
+    const input = document.getElementById('boundaryCountrySearch');
+    const raw = (input ? input.value : '').trim();
+    const paren = raw.match(/\(([A-Z]{3})\)$/i);
+    if (paren) return paren[1].toUpperCase();
+    if (/^[A-Z]{3}$/i.test(raw)) return raw.toUpperCase();
+    const match = boundaryCountries.find(c => c.name.toLowerCase() === raw.toLowerCase());
+    return match ? match.iso : '';
+  }
+
+  async function fetchBoundaryFeatures(iso, level) {
+    const metaUrl = `https://www.geoboundaries.org/api/current/gbOpen/${iso}/${level}/`;
+    const metaRes = await fetch(metaUrl);
+    if (!metaRes.ok) throw new Error(`geoBoundaries returned HTTP ${metaRes.status} for ${iso} ${level}`);
+    const meta = await metaRes.json();
+    const geoJsonUrl = normalizeGeoJsonUrl(meta.gjDownloadURL || meta.geoJSON || meta.simplifiedGeometryGeoJSON);
+    if (!geoJsonUrl) throw new Error(`No GeoJSON download URL found for ${iso} ${level}`);
+    const geoRes = await fetch(geoJsonUrl);
+    if (!geoRes.ok) throw new Error(`Boundary download returned HTTP ${geoRes.status} for ${level}`);
+    const geo = await geoRes.json();
+    return (geo.type === 'FeatureCollection' ? geo.features : [geo])
+      .filter(f => chooseLargestRing(f))
+      .sort((a, b) => boundaryName(a).localeCompare(boundaryName(b)));
+  }
+
+  function ringCentroid(ring) {
+    if (!ring || ring.length === 0) return null;
+    const sum = ring.reduce((acc, pt) => ({ lat: acc.lat + pt.lat, lng: acc.lng + pt.lng }), { lat: 0, lng: 0 });
+    return { lat: sum.lat / ring.length, lng: sum.lng / ring.length };
+  }
+
+  function featureContainsFeature(parent, child) {
+    const parentRing = chooseLargestRing(parent);
+    const childRing = chooseLargestRing(child);
+    const center = ringCentroid(childRing);
+    return parentRing && center && pointInRing(center.lat, center.lng, parentRing);
+  }
+
+  function populateBoundarySelect(select, features, blankLabel, itemLabel) {
+    select.innerHTML = `<option value="">${blankLabel}</option>`;
+    features.forEach((feature, index) => {
+      const opt = document.createElement('option');
+      opt.value = String(index);
+      opt.textContent = boundaryName(feature, `${itemLabel} ${index + 1}`);
+      select.appendChild(opt);
+    });
+  }
+
+  function selectedBoundaryFeature() {
+    const districtSelect = document.getElementById('boundaryDistrictSelect');
+    const citySelect = document.getElementById('boundaryCitySelect');
+    const districtIndex = districtSelect.value === '' ? -1 : parseInt(districtSelect.value, 10);
+    const cityIndex = citySelect.value === '' ? -1 : parseInt(citySelect.value, 10);
+    if (districtIndex >= 0) return boundaryDistrictFeatures[districtIndex];
+    if (cityIndex >= 0) return boundaryCityFeatures[cityIndex];
+    return boundaryCountryFeature;
+  }
+
+  async function loadBoundaryCountryCascading() {
+    const iso = selectedCountryIso();
+    const status = document.getElementById('boundaryStatus');
+    const citySelect = document.getElementById('boundaryCitySelect');
+    const districtSelect = document.getElementById('boundaryDistrictSelect');
+    const applyBtn = document.getElementById('applyBoundaryBtn');
+    if (!/^[A-Z]{3}$/.test(iso)) {
+      status.textContent = 'Choose a country from the list or type a 3-letter ISO code.';
+      status.classList.remove('good');
+      return;
+    }
+    if (boundaryLoadedIso === iso && boundaryCountryFeature) return;
+    status.textContent = `Loading ${iso} country and city/region boundaries...`;
+    status.classList.remove('good');
+    citySelect.disabled = true;
+    districtSelect.disabled = true;
+    applyBtn.disabled = true;
+    citySelect.innerHTML = '<option value="">Loading...</option>';
+    districtSelect.innerHTML = '<option value="">Select city first</option>';
+    boundaryCountryFeature = null;
+    boundaryCityFeatures = [];
+    boundaryDistrictFeatures = [];
+    boundaryLoadedIso = '';
+    const countryFeatures = await fetchBoundaryFeatures(iso, 'ADM0');
+    boundaryCountryFeature = countryFeatures[0] || null;
+    if (!boundaryCountryFeature) throw new Error('No country boundary found');
+    try {
+      boundaryCityFeatures = await fetchBoundaryFeatures(iso, 'ADM1');
+    } catch (err) {
+      console.warn(err);
+      boundaryCityFeatures = [];
+    }
+    populateBoundarySelect(citySelect, boundaryCityFeatures, 'Whole country', 'Area');
+    citySelect.disabled = false;
+    applyBtn.disabled = false;
+    status.textContent = boundaryCityFeatures.length
+      ? `${boundaryCityFeatures.length} city/region options loaded. Leave blank for whole country.`
+      : 'Country loaded. No city/region level found; leave blank for whole country.';
+    status.classList.add('good');
+    boundaryLoadedIso = iso;
+  }
+
+  function scheduleBoundaryCountryLoad() {
+    const iso = selectedCountryIso();
+    if (!/^[A-Z]{3}$/.test(iso) || boundaryLoadedIso === iso) return;
+    clearTimeout(boundaryLoadTimer);
+    boundaryLoadTimer = setTimeout(async () => {
+      try {
+        await loadBoundaryCountryCascading();
+      } catch (err) {
+        console.error(err);
+        const status = document.getElementById('boundaryStatus');
+        status.textContent = 'Boundary load failed: ' + err.message;
+        status.classList.remove('good');
+      }
+    }, 350);
+  }
+
+  async function loadBoundaryDistrictsCascading() {
+    const iso = selectedCountryIso();
+    const citySelect = document.getElementById('boundaryCitySelect');
+    const districtSelect = document.getElementById('boundaryDistrictSelect');
+    const status = document.getElementById('boundaryStatus');
+    boundaryDistrictFeatures = [];
+    districtSelect.disabled = true;
+    districtSelect.innerHTML = '<option value="">Select city first</option>';
+    if (citySelect.value === '') {
+      status.textContent = 'Whole country selected. Choose Use Selection or pick a city/region.';
+      status.classList.add('good');
+      return;
+    }
+    const cityFeature = boundaryCityFeatures[parseInt(citySelect.value, 10)];
+    status.textContent = `Loading districts inside ${boundaryName(cityFeature)}...`;
+    status.classList.remove('good');
+    districtSelect.innerHTML = '<option value="">Loading...</option>';
+    try {
+      const allDistricts = await fetchBoundaryFeatures(iso, 'ADM2');
+      boundaryDistrictFeatures = allDistricts.filter(feature => featureContainsFeature(cityFeature, feature));
+    } catch (err) {
+      console.warn(err);
+      boundaryDistrictFeatures = [];
+    }
+    populateBoundarySelect(districtSelect, boundaryDistrictFeatures, `All of ${boundaryName(cityFeature)}`, 'District');
+    districtSelect.disabled = false;
+    status.textContent = boundaryDistrictFeatures.length
+      ? `${boundaryDistrictFeatures.length} district options loaded. Leave blank for all of ${boundaryName(cityFeature)}.`
+      : `No district level found inside ${boundaryName(cityFeature)}. Leave blank for the full city/region.`;
+    status.classList.add('good');
+  }
+
+  const cascadingLoadBoundaryBtn = document.getElementById('loadBoundaryBtn');
+  if (cascadingLoadBoundaryBtn) cascadingLoadBoundaryBtn.onclick = async function() {
+    try {
+      await loadBoundaryCountryCascading();
+    } catch (err) {
+      console.error(err);
+      const status = document.getElementById('boundaryStatus');
+      status.textContent = 'Boundary load failed: ' + err.message;
+      status.classList.remove('good');
+    }
+  };
+
+  function resetBoundaryCascadeForCountryChange() {
+    document.getElementById('applyBoundaryBtn').disabled = true;
+    document.getElementById('boundaryCitySelect').disabled = true;
+    document.getElementById('boundaryCitySelect').innerHTML = '<option value="">Load country first</option>';
+    document.getElementById('boundaryDistrictSelect').disabled = true;
+    document.getElementById('boundaryDistrictSelect').innerHTML = '<option value="">Select city first</option>';
+    boundaryLoadedIso = '';
+  }
+
+  document.getElementById('boundaryCountrySearch').oninput = function() {
+    resetBoundaryCascadeForCountryChange();
+    scheduleBoundaryCountryLoad();
+  };
+
+  document.getElementById('boundaryCountrySearch').onchange = function() {
+    resetBoundaryCascadeForCountryChange();
+    scheduleBoundaryCountryLoad();
+  };
+
+  document.getElementById('boundaryCitySelect').onchange = async function() {
+    try {
+      await loadBoundaryDistrictsCascading();
+    } catch (err) {
+      console.error(err);
+      const status = document.getElementById('boundaryStatus');
+      status.textContent = 'District load failed: ' + err.message;
+      status.classList.remove('good');
+    }
+  };
+
+  document.getElementById('applyBoundaryBtn').onclick = function() {
+    const feature = selectedBoundaryFeature();
+    const ring = chooseLargestRing(feature);
+    if (!ring) return;
+    const layer = L.polygon(ring.map(pt => [pt.lat, pt.lng]), { color: '#dce6ef', weight: 2, fillOpacity: 0.05 });
+    handleAreaCreated(layer);
+    map.fitBounds(layer.getBounds(), { padding: [20, 20] });
+    const name = boundaryName(feature);
+    document.getElementById('status1').textContent += ` Â· ${name}`;
+    setFooter('Operational area loaded: ' + name);
+  };
+
+  loadCountryList();
 
   // ============ FILE UPLOAD (KML / KMZ) ============
   document.getElementById('areaFileInput').onchange = async function(e) {
@@ -2966,7 +3488,7 @@
         const t = (prioTargetsForPdf[cat.id] || 0) * 100;
         return `${cat.name.substring(0,8)} ${cat.kpiSec}s/${t.toFixed(0)}%`;
       }).join(' · ');
-      const profileLine = `Categories: ${targetsStr}   ·   Window: ${windowLabel}   ·   Service Time: ${kpi.serviceTimeMin}min   ·   Area: ${areaKm2.toFixed(2)} km²   ·   Incidents: ${incidents.length}   ·   No-Fly: ${noFlyZones.length}   ·   No-Deploy: ${noDeployZones.length}`;
+      const profileLine = `Categories: ${targetsStr}   ·   Window: ${windowLabel}   ·   Service Time: ${kpi.serviceTimeMin}min   ·   Area: ${formatArea(areaKm2)}   ·   Incidents: ${incidents.length}   ·   No-Fly: ${noFlyZones.length}   ·   No-Deploy: ${noDeployZones.length}`;
       pdf.text(profileLine, M, y);
       text(T.text);
       y += 4;
@@ -3093,7 +3615,7 @@
           fill(T.surface1);
           pdf.rect(M, y, W, rowH, 'F');
         }
-        const radiusLabel = s.radius >= 1000 ? (s.radius / 1000).toFixed(2) + ' km' : Math.round(s.radius) + ' m';
+        const radiusLabel = formatDistance(s.radius);
         const svc = s.achievedServiceLevel != null ? (s.achievedServiceLevel * 100).toFixed(1) + '%' : '—';
         const ct = s.clusterTotals || {};
         const mixParts = incidentCategories.slice(0, 4).map(cat => String(ct[cat.id] || 0));
@@ -3112,7 +3634,7 @@
         const cells = [
           String(i + 1),
           (s.typeName || 'DFR Station').substring(0, 18),
-          s.lat.toFixed(4) + ', ' + s.lng.toFixed(4),
+          formatCoordinate(s.lat, s.lng),
           radiusLabel,
           String(s.covered),
           mixStr,
@@ -3594,15 +4116,14 @@
     const preview = inArea.slice(0, 5);
     const catLookup = {};
     for (const c of incidentCategories) catLookup[c.id] = c.name;
-    let html = '<thead><tr><th>#</th><th>Lat</th><th>Lng</th><th>Timestamp</th>';
+    let html = '<thead><tr><th>#</th><th>Coordinates</th><th>Timestamp</th>';
     if (result.hasPriorityColumn) html += '<th>Category</th>';
     html += '</tr></thead><tbody>';
     preview.forEach((p, i) => {
       const ts = new Date(p.timestamp).toISOString().replace('T', ' ').slice(0, 19);
       html += `<tr>
         <td>${i + 1}</td>
-        <td>${p.lat.toFixed(5)}</td>
-        <td>${p.lng.toFixed(5)}</td>
+        <td>${formatCoordinate(p.lat, p.lng)}</td>
         <td>${ts}</td>`;
       if (result.hasPriorityColumn) {
         html += `<td>${escapeHtml(catLookup[p.priority] || p.priority)}</td>`;
@@ -3805,6 +4326,7 @@
 
   // ============ INCIDENT STATISTICS ============
   function updateIncidentStats(meta) {
+    window.__lastIncidentStatsMeta = meta || null;
     const block = document.getElementById('incidentStatsBlock');
     if (!incidents || incidents.length === 0) {
       block.style.display = 'none';
@@ -3926,9 +4448,7 @@
     const minLat = Math.min(...lats), maxLat = Math.max(...lats);
     const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
     const diagonalM = haversine({ lat: minLat, lng: minLng }, { lat: maxLat, lng: maxLng });
-    const spreadLabel = diagonalM >= 1000
-      ? (diagonalM / 1000).toFixed(1) + ' km'
-      : diagonalM.toFixed(0) + ' m';
+    const spreadLabel = formatDistance(diagonalM, 1);
     document.getElementById('stat-spread').textContent = spreadLabel;
 
     // ---- HISTOGRAM RENDER ----

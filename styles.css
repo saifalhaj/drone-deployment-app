@@ -139,6 +139,24 @@ main { flex: 1; display: flex; min-height: 0; }
 }
 .mode-tab:hover { color: var(--text); }
 .mode-tab.active { background: var(--surface-3); color: var(--text); }
+.mode-tab.area-method-tab.active {
+  color: var(--accent);
+  border: 1px solid rgba(220, 230, 239, 0.28);
+}
+.area-method-tabs { margin-bottom: 10px; }
+.area-method-panel { margin-bottom: 8px; }
+.upload-area-action {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+.upload-area-btn {
+  width: 100%;
+  max-width: 360px;
+  text-align: center;
+  cursor: pointer;
+}
+.hidden { display: none !important; }
 
 .drone-type {
   background: var(--bg);

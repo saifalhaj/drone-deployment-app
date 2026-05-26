@@ -57,11 +57,11 @@
           </div>
           <div class="field-row">
             <div class="field">
-              <label class="field-label">Speed (m/s)</label>
+              <label class="field-label" id="droneSpeedLabel">Speed (m/s)</label>
               <input type="number" id="droneSpeed" value="20" min="5" max="100">
             </div>
             <div class="field">
-              <label class="field-label">Radius (m)</label>
+              <label class="field-label" id="manualRadiusLabel">Radius (m)</label>
               <input type="number" id="manualRadius" placeholder="auto from speed">
             </div>
           </div>
@@ -73,6 +73,24 @@
           <div class="derived">
             <span>Effective Coverage Radius</span>
             <span class="derived-value" id="radiusDisplay">1200 m</span>
+          </div>
+          <div class="subsection-label" style="margin-top: 12px;">Localization</div>
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label">Units</label>
+              <select id="unitSystem">
+                <option value="metric" selected>Metric</option>
+                <option value="imperial">Imperial</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="field-label">Coordinates</label>
+              <select id="coordFormat">
+                <option value="decimal" selected>Decimal degrees</option>
+                <option value="dms">DMS</option>
+                <option value="utm">UTM grid</option>
+              </select>
+            </div>
           </div>
           <div id="minimizePresetNote" class="type-notes" style="margin-top: 4px;"></div>
         </div>
@@ -91,20 +109,55 @@
           <span class="step-tag">STEP 01</span>
           <span class="panel-title">Define Operational Area</span>
         </div>
-        <p class="help">Draw or upload your area of responsibility. Add <strong>No-Fly Zones</strong> (drones cannot enter) and <strong>No-Deploy Zones</strong> (stations cannot be placed, but drones may still fly through). Each layer can be saved as KMZ for reuse.</p>
+        <p class="help">Choose how to define the operational area. Add <strong>No-Fly Zones</strong> (drones cannot enter) and <strong>No-Deploy Zones</strong> (stations cannot be placed, but drones may still fly through). Each layer can be saved as KMZ for reuse.</p>
 
         <div class="subsection-label">Operational Area</div>
+        <div class="mode-tabs area-method-tabs" role="group" aria-label="Operational area source">
+          <button class="mode-tab area-method-tab active" data-area-method="draw" type="button">Draw</button>
+          <button class="mode-tab area-method-tab" data-area-method="upload" type="button">Upload</button>
+          <button class="mode-tab area-method-tab" data-area-method="boundary" type="button">Boundary</button>
+        </div>
+        <div class="area-method-panel" id="areaMethodDraw">
+        <p class="help" style="font-size: 11px;">Manually draw the operational area on the map.</p>
         <div class="field-row" style="margin-bottom: 6px;">
           <button class="btn btn-secondary draw-btn" id="drawRectBtn">▭&nbsp; Rectangle</button>
           <button class="btn btn-secondary draw-btn" id="drawPolyBtn">⬠&nbsp; Polygon</button>
         </div>
-        <div class="field-row" style="margin-bottom: 6px;">
-          <label class="btn btn-secondary" style="text-align:center;cursor:pointer;">
-            ⬆&nbsp; Upload KML / KMZ
-            <input type="file" id="areaFileInput" accept=".kml,.kmz" style="display:none;">
-          </label>
-          <button class="btn btn-ghost" id="downloadArea" disabled>⬇ Save KMZ</button>
         </div>
+        <div class="area-method-panel hidden" id="areaMethodUpload">
+        <p class="help" style="font-size: 11px;">Upload an existing operational area from KML, KMZ, GeoJSON, or JSON.</p>
+        <div class="upload-area-action">
+          <label class="btn btn-secondary upload-area-btn">
+            ⬆&nbsp; Upload KML / KMZ / GeoJSON
+            <input type="file" id="areaFileInput" accept=".kml,.kmz,.geojson,.json" style="display:none;">
+          </label>
+        </div>
+        </div>
+        <div class="area-method-panel hidden" id="areaMethodBoundary">
+        <div class="subsection-label" style="margin-top: 0;">Boundary Library</div>
+        <p class="help" style="font-size: 11px;">Search a country, then optionally narrow to a city or district. Leaving a dropdown blank uses the full parent area.</p>
+        <div class="field">
+          <label class="field-label">Country</label>
+          <input type="text" id="boundaryCountrySearch" list="boundaryCountryList" value="United Arab Emirates (ARE)" placeholder="Type country name or ISO3 code">
+          <datalist id="boundaryCountryList"></datalist>
+        </div>
+        <div class="field">
+          <label class="field-label">City / Region</label>
+          <select id="boundaryCitySelect" disabled>
+            <option value="">Select country first</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label">District</label>
+          <select id="boundaryDistrictSelect" disabled>
+            <option value="">Select city first</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" id="applyBoundaryBtn" disabled style="margin-bottom: 6px;">Use Selection</button>
+        <div class="status-line" id="boundaryStatus">Online source: geoBoundaries open administrative boundaries</div>
+        </div>
+
+        <button class="btn btn-ghost" id="downloadArea" disabled style="margin-bottom: 6px;">⬇ Save KMZ</button>
         <button class="btn btn-ghost" id="clearArea" style="margin-bottom: 4px;">Clear Area</button>
         <div class="status-line" id="status1">Awaiting area selection</div>
 
@@ -116,7 +169,7 @@
           <button class="btn btn-secondary draw-btn" id="drawNoFlyBtn">⬠&nbsp; Draw</button>
           <label class="btn btn-secondary" style="text-align:center;cursor:pointer;">
             ⬆&nbsp; Upload
-            <input type="file" id="noFlyFileInput" accept=".kml,.kmz" style="display:none;">
+            <input type="file" id="noFlyFileInput" accept=".kml,.kmz,.geojson,.json" style="display:none;">
           </label>
         </div>
         <div class="field-row" style="margin-bottom: 6px;">
@@ -133,7 +186,7 @@
           <button class="btn btn-secondary draw-btn" id="drawNoDeployBtn">⬠&nbsp; Draw</button>
           <label class="btn btn-secondary" style="text-align:center;cursor:pointer;">
             ⬆&nbsp; Upload
-            <input type="file" id="noDeployFileInput" accept=".kml,.kmz" style="display:none;">
+            <input type="file" id="noDeployFileInput" accept=".kml,.kmz,.geojson,.json" style="display:none;">
           </label>
         </div>
         <div class="field-row" style="margin-bottom: 6px;">
