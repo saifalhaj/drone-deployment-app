@@ -545,11 +545,11 @@
     opts = opts || {};
     const dark = opts.dark !== false; // default dark
     const palette = dark ? {
-      bg: '#0a0e14', grid: '#232a36', axis: '#4a5263', text: '#e0e6ed',
-      muted: '#6e7891', bar: opts.barColor || '#22d3ee', line: opts.lineColor || '#f59e0b'
+      bg: '#020609', grid: '#17242f', axis: '#54697a', text: '#dce6ef',
+      muted: '#8ea4b7', bar: opts.barColor || '#9fb4c8', line: opts.lineColor || '#dce6ef'
     } : {
       bg: '#ffffff', grid: '#e5e7eb', axis: '#9ca3af', text: '#111827',
-      muted: '#6b7280', bar: opts.barColor || '#0891b2', line: opts.lineColor || '#d97706'
+      muted: '#6b7280', bar: opts.barColor || '#0891b2', line: opts.lineColor || '#c7d5e1'
     };
 
     const ctx = canvas.getContext('2d');
@@ -716,13 +716,13 @@
   // ============ INCIDENT CATEGORIES (dynamic) ============
   // Each category: { id, name, color, kpiSec, serviceLevel (0-1), weight }
   // Order in array = priority order (first = highest priority).
-  const CATEGORY_COLOR_POOL = ['#fb7185', '#f59e0b', '#fbbf24', '#84cc16', '#22d3ee', '#a78bfa', '#ec4899', '#14b8a6', '#fb923c', '#f43f5e'];
+  const CATEGORY_COLOR_POOL = ['#e38b95', '#dce6ef', '#9fb4c8', '#b79cf2', '#8ea4b7', '#c7d5e1', '#6f8798', '#f2c1c7', '#7f6fb0', '#54697a'];
 
   let incidentCategories = [
     // Default: one category, user adds more as needed.
     // overheadSec = dock-open + sensor warmup + launch + climb to operating altitude.
     // Subtracted from kpiSec before computing the coverage radius.
-    { id: 'cat_default', name: 'Critical', color: '#fb7185', kpiSec: 60, overheadSec: 15, serviceLevel: 0.95, weight: 1 }
+    { id: 'cat_default', name: 'Critical', color: '#e38b95', kpiSec: 60, overheadSec: 15, serviceLevel: 0.95, weight: 1 }
   ];
 
   function getCategoryById(id) {
@@ -1193,7 +1193,7 @@
         covered: finalSet.length,
         incidentIdx: finalSet.slice(),
         radius: maxRadius,  // widest radius (for the rendered circle / report)
-        color: '#f59e0b',
+        color: '#dce6ef',
         typeName: 'DFR Station'
       });
       for (const j of finalSet) {
@@ -1244,7 +1244,7 @@
       // viewer immediately reads "drone won't fly here".
       L.circleMarker([inc.lat, inc.lng], {
         radius,
-        color: isCovered === false ? '#fb7185' : cat.color,
+        color: isCovered === false ? '#e38b95' : cat.color,
         fillColor: cat.color,
         fillOpacity: inNoFly ? 0.55 : 0.85,
         weight: isHighPrio ? 2 : 1,
@@ -1258,7 +1258,7 @@
     stationLayer.clearLayers();
     coverageLayer.clearLayers();
     stations.forEach((s, idx) => {
-      const color = s.color || '#f59e0b';
+      const color = s.color || '#dce6ef';
       const radius = s.radius || 1000;
       const units = s.units || 1;
       const shortfall = s.shortfall || 0;
@@ -1273,15 +1273,15 @@
       }).addTo(coverageLayer);
 
       const badge = units > 1
-        ? `<div style="position:absolute;top:-7px;right:-12px;background:#0a0e14;color:${color};border:1.5px solid ${color};font-family:'IBM Plex Mono';font-size:9px;font-weight:700;padding:1px 5px;border-radius:9px;line-height:1.2;letter-spacing:0.3px;">×${units}</div>`
+        ? `<div style="position:absolute;top:-7px;right:-12px;background:#020609;color:${color};border:1.5px solid ${color};font-family:'IBM Plex Mono';font-size:9px;font-weight:700;padding:1px 5px;border-radius:9px;line-height:1.2;letter-spacing:0.3px;">×${units}</div>`
         : '';
       const warn = shortfall > 0
-        ? `<div title="Under-allocated by ${shortfall}" style="position:absolute;bottom:-5px;left:-5px;background:#fb7185;width:9px;height:9px;border-radius:50%;border:1.5px solid #0a0e14;box-shadow:0 0 6px rgba(251,113,133,0.7);"></div>`
+        ? `<div title="Under-allocated by ${shortfall}" style="position:absolute;bottom:-5px;left:-5px;background:#e38b95;width:9px;height:9px;border-radius:50%;border:1.5px solid #020609;box-shadow:0 0 6px rgba(227,139,149,0.7);"></div>`
         : '';
 
       const icon = L.divIcon({
         html: `<div style="position:relative;width:22px;height:22px;">
-                 <div style="background:${color};border:3px solid #1a1208;width:22px;height:22px;border-radius:50%;box-shadow:0 0 12px ${color}99;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono';font-size:10px;font-weight:600;color:#1a1208;">${idx + 1}</div>
+                 <div style="background:${color};border:3px solid #020609;width:22px;height:22px;border-radius:50%;box-shadow:0 0 12px ${color}99;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono';font-size:10px;font-weight:600;color:#020609;">${idx + 1}</div>
                  ${badge}
                  ${warn}
                </div>`,
@@ -1303,13 +1303,13 @@
             const pct = ((s.achievedByPriority[cat.id] || 0) * 100).toFixed(1);
             const shortFlag = s.priorityShortfall && s.priorityShortfall[cat.id];
             const dot = `<span style="display:inline-block;width:8px;height:8px;background:${cat.color};border-radius:50%;margin-right:4px;"></span>`;
-            lines.push(`${dot}${cat.name}: ${count} @ ${pct}%${shortFlag ? ' <span style="color:#fb7185">⚠</span>' : ''}`);
+            lines.push(`${dot}${cat.name}: ${count} @ ${pct}%${shortFlag ? ' <span style="color:#e38b95">⚠</span>' : ''}`);
           }
         }
         if (lines.length > 0) prioBreakdown = lines.join('<br>') + '<br>';
       }
       const popup = `<b>${typeName} · Site #${idx + 1}</b>` +
-        `Units: ${units}${shortfall > 0 ? ` <span style="color:#fb7185">(short ${shortfall})</span>` : ''}<br>` +
+        `Units: ${units}${shortfall > 0 ? ` <span style="color:#e38b95">(short ${shortfall})</span>` : ''}<br>` +
         `Covers: ${s.covered} incident${s.covered === 1 ? '' : 's'}<br>` +
         prioBreakdown +
         (s.peakConcurrent != null ? `Peak concurrent: ${s.peakConcurrent}<br>` : '') +
@@ -1387,9 +1387,9 @@
     if (polygonPoints.length === 0) return;
     const pts = hoverPoint ? polygonPoints.concat([hoverPoint, polygonPoints[0]]) : polygonPoints.slice();
     if (pts.length >= 2) {
-      tempPreview = L.polyline(pts, { color: '#f59e0b', weight: 2, dashArray: '4,5', opacity: 0.85 }).addTo(map);
+      tempPreview = L.polyline(pts, { color: '#dce6ef', weight: 2, dashArray: '4,5', opacity: 0.85 }).addTo(map);
     } else {
-      tempPreview = L.circleMarker(pts[0], { radius: 4, color: '#f59e0b', fillColor: '#f59e0b', fillOpacity: 1 }).addTo(map);
+      tempPreview = L.circleMarker(pts[0], { radius: 4, color: '#dce6ef', fillColor: '#dce6ef', fillOpacity: 1 }).addTo(map);
     }
   }
   function onPolyFinish(e) {
@@ -1401,17 +1401,17 @@
     const pts = polygonPoints.slice();
     const target = window.__drawTarget || 'area';
     if (target === 'nofly') {
-      const poly = L.polygon(pts, { color: '#fb7185', weight: 2 });
+      const poly = L.polygon(pts, { color: '#e38b95', weight: 2 });
       exitDrawing();
       addNoFlyZone(poly);
       setFooter('No-fly zone added');
     } else if (target === 'nodeploy') {
-      const poly = L.polygon(pts, { color: '#a78bfa', weight: 2 });
+      const poly = L.polygon(pts, { color: '#b79cf2', weight: 2 });
       exitDrawing();
       addNoDeployZone(poly);
       setFooter('No-deploy zone added');
     } else {
-      const poly = L.polygon(pts, { color: '#f59e0b', weight: 2, fillOpacity: 0.05 });
+      const poly = L.polygon(pts, { color: '#dce6ef', weight: 2, fillOpacity: 0.05 });
       exitDrawing();
       handleAreaCreated(poly);
     }
@@ -1425,7 +1425,7 @@
   function onRectMove(e) {
     if (!rectStart) return;
     if (tempRect) map.removeLayer(tempRect);
-    tempRect = L.rectangle([rectStart, e.latlng], { color: '#f59e0b', weight: 2, fillOpacity: 0.05, dashArray: '4,5' }).addTo(map);
+    tempRect = L.rectangle([rectStart, e.latlng], { color: '#dce6ef', weight: 2, fillOpacity: 0.05, dashArray: '4,5' }).addTo(map);
   }
   function onRectUp(e) {
     if (!rectStart) return;
@@ -1437,7 +1437,7 @@
       setFooter('Rectangle too small — try again');
       return;
     }
-    const rect = L.rectangle(bounds, { color: '#f59e0b', weight: 2, fillOpacity: 0.05 });
+    const rect = L.rectangle(bounds, { color: '#dce6ef', weight: 2, fillOpacity: 0.05 });
     exitDrawing();
     handleAreaCreated(rect);
   }
@@ -1625,7 +1625,7 @@
           const target = (targets[cat.id] || 0) * 100;
           const miss = achieved < target - 0.05;
           const shortName = cat.name.length > 6 ? cat.name.substring(0, 6) : cat.name;
-          const fg = miss ? '#fb7185' : '#0a0e14';
+          const fg = miss ? '#e38b95' : '#020609';
           const bg = miss ? 'transparent' : cat.color;
           const border = `1px solid ${cat.color}`;
           return `<span class="prio-pill" style="background:${bg};color:${miss ? cat.color : fg};border:${border};${miss ? 'text-decoration:line-through;' : ''}">${shortName} ${achieved.toFixed(0)}/${target.toFixed(0)}</span>`;
@@ -1656,12 +1656,12 @@
           chartBlock.style.display = 'block';
           renderMarginalChart(document.getElementById('canvasCov'), curve, {
             series: 'coverage', title: 'Geographic Coverage',
-            lineColor: '#22d3ee', barColor: '#22d3ee',
+            lineColor: '#9fb4c8', barColor: '#9fb4c8',
             width: chartBlock.clientWidth - 24, height: 130, dpr: dpr
           });
           renderMarginalChart(document.getElementById('canvasKpi'), curve, {
             series: 'kpi', title: 'KPI Compliance',
-            lineColor: '#f59e0b', barColor: '#f59e0b',
+            lineColor: '#dce6ef', barColor: '#dce6ef',
             width: chartBlock.clientWidth - 24, height: 130, dpr: dpr
           });
         } else if (chartBlock) {
@@ -1807,7 +1807,7 @@
 
   // ============ FLEET MODE ============
   const TYPE_COLORS = [
-    '#f59e0b', '#22d3ee', '#a78bfa', '#84cc16',
+    '#dce6ef', '#9fb4c8', '#b79cf2', '#84cc16',
     '#ec4899', '#fb923c', '#14b8a6', '#f43f5e'
   ];
   let optMode = 'minimize';
@@ -2270,7 +2270,7 @@
 
   // ============ NO-FLY ZONE MANAGEMENT ============
   function addNoFlyZone(polygon) {
-    polygon.setStyle({ color: '#fb7185', weight: 2, fillColor: '#fb7185', fillOpacity: 0.15, dashArray: '4,4' });
+    polygon.setStyle({ color: '#e38b95', weight: 2, fillColor: '#e38b95', fillOpacity: 0.15, dashArray: '4,4' });
     noFlyLayer.addLayer(polygon);
     noFlyZones.push(polygon);
     __noFlyCache = []; // invalidate
@@ -2299,7 +2299,7 @@
   }
 
   function addNoDeployZone(polygon) {
-    polygon.setStyle({ color: '#a78bfa', weight: 2, fillColor: '#a78bfa', fillOpacity: 0.12, dashArray: '6,3' });
+    polygon.setStyle({ color: '#b79cf2', weight: 2, fillColor: '#b79cf2', fillOpacity: 0.12, dashArray: '6,3' });
     noDeployLayer.addLayer(polygon);
     noDeployZones.push(polygon);
     __noDeployCache = [];
@@ -2384,7 +2384,7 @@
       for (const p of polys) {
         if (p.length > maxPts) { chosen = p; maxPts = p.length; }
       }
-      const layer = L.polygon(chosen.map(pt => [pt.lat, pt.lng]), { color: '#f59e0b', weight: 2, fillOpacity: 0.05 });
+      const layer = L.polygon(chosen.map(pt => [pt.lat, pt.lng]), { color: '#dce6ef', weight: 2, fillOpacity: 0.05 });
       handleAreaCreated(layer);
       map.fitBounds(layer.getBounds(), { padding: [20, 20] });
       setFooter('Area loaded from ' + file.name);
@@ -2614,7 +2614,7 @@
       tileCanvas = await html2canvas(tilePane, {
         useCORS: true,
         allowTaint: true,
-        backgroundColor: '#0d1117',
+        backgroundColor: '#020609',
         logging: false,
         scale: 1,    // 1× for reasonable file size; satellite imagery is photographic
         width: W,
@@ -2626,7 +2626,7 @@
       tileCanvas = document.createElement('canvas');
       tileCanvas.width = W; tileCanvas.height = H;
       const fctx = tileCanvas.getContext('2d');
-      fctx.fillStyle = '#0d1117';
+      fctx.fillStyle = '#020609';
       fctx.fillRect(0, 0, W, H);
     }
 
@@ -2635,7 +2635,7 @@
     out.width = W; out.height = H;
     const ctx = out.getContext('2d');
     // Dark background in case any tiles are missing
-    ctx.fillStyle = '#0d1117';
+    ctx.fillStyle = '#020609';
     ctx.fillRect(0, 0, W, H);
     ctx.drawImage(tileCanvas, 0, 0, W, H);
 
@@ -2676,17 +2676,17 @@
 
     // 3a. Operational area
     if (areaPolygon) {
-      drawPolygon(areaPolygon, null, '#f59e0b', false);
+      drawPolygon(areaPolygon, null, '#dce6ef', false);
     }
 
     // 3b. No-fly zones (coral, dashed, translucent fill)
     for (const z of noFlyZones) {
-      drawPolygon(z, 'rgba(251, 113, 133, 0.15)', '#fb7185', true);
+      drawPolygon(z, 'rgba(227, 139, 149, 0.15)', '#e38b95', true);
     }
 
     // 3c. No-deploy zones (purple, dashed, translucent fill)
     for (const z of noDeployZones) {
-      drawPolygon(z, 'rgba(167, 139, 250, 0.12)', '#a78bfa', true);
+      drawPolygon(z, 'rgba(183, 156, 242, 0.12)', '#b79cf2', true);
     }
 
     // 3d. Coverage circles (one per station). Compute pixel radius from a point
@@ -2705,8 +2705,8 @@
         return Math.abs(p2.x - p1.x) / offsetMeters;
       })();
 
-      ctx.fillStyle = 'rgba(34, 211, 238, 0.10)';
-      ctx.strokeStyle = 'rgba(34, 211, 238, 0.45)';
+      ctx.fillStyle = 'rgba(159, 180, 200, 0.10)';
+      ctx.strokeStyle = 'rgba(159, 180, 200, 0.45)';
       ctx.lineWidth = 1;
       ctx.setLineDash([]);
       for (const s of stations) {
@@ -2739,15 +2739,15 @@
     for (let i = 0; i < stations.length; i++) {
       const s = stations[i];
       const p = ll2px({ lat: s.lat, lng: s.lng });
-      ctx.fillStyle = '#f59e0b';
-      ctx.strokeStyle = '#0a0e14';
+      ctx.fillStyle = '#dce6ef';
+      ctx.strokeStyle = '#020609';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.arc(p.x, p.y, 11, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
       // Index label
-      ctx.fillStyle = '#0a0e14';
+      ctx.fillStyle = '#020609';
       ctx.font = 'bold 11px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -2806,14 +2806,14 @@
       chartCovCanvas.width = 600; chartCovCanvas.height = 200;
       renderMarginalChart(chartCovCanvas, curve, {
         series: 'coverage', title: 'Geographic Coverage',
-        lineColor: '#22d3ee', barColor: '#22d3ee',
+        lineColor: '#9fb4c8', barColor: '#9fb4c8',
         dark: true, width: 600, height: 200
       });
       const chartKpiCanvas = document.createElement('canvas');
       chartKpiCanvas.width = 600; chartKpiCanvas.height = 200;
       renderMarginalChart(chartKpiCanvas, curve, {
         series: 'kpi', title: 'KPI Compliance',
-        lineColor: '#f59e0b', barColor: '#f59e0b',
+        lineColor: '#dce6ef', barColor: '#dce6ef',
         dark: true, width: 600, height: 200
       });
       const chartCovDataUrl = chartCovCanvas.toDataURL('image/png');
@@ -2824,17 +2824,17 @@
 
       // Dark palette for the PDF (mirrors the app's color scheme)
       const T = {
-        bg:         [10, 14, 20],     // page background
-        surface1:   [22, 28, 37],     // tile/section bg
-        surface2:   [29, 36, 46],     // accent tile bg
-        border:     [47, 56, 71],
-        text:       [224, 230, 237],
-        muted:      [110, 120, 145],
-        dim:        [74, 82, 99],
-        accent:     [245, 158, 11],
-        accentDim:  [120, 80, 20],
-        coverage:   [34, 211, 238],
-        incident:   [251, 113, 133]
+        bg:         [2, 6, 9],        // page background
+        surface1:   [6, 11, 16],      // tile/section bg
+        surface2:   [9, 15, 21],      // accent tile bg
+        border:     [23, 36, 47],
+        text:       [220, 230, 239],
+        muted:      [142, 164, 183],
+        dim:        [84, 105, 122],
+        accent:     [220, 230, 239],
+        accentDim:  [142, 164, 183],
+        coverage:   [159, 180, 200],
+        incident:   [227, 139, 149]
       };
       function fill(c) { pdf.setFillColor(c[0], c[1], c[2]); }
       function stroke(c) { pdf.setDrawColor(c[0], c[1], c[2]); }
@@ -3004,10 +3004,10 @@
       }
 
       const legendItems = [];
-      if (areaPolygon) legendItems.push({ kind: 'line', color: '#f59e0b', label: 'Operational Area' });
-      if (noFlyZones.length > 0) legendItems.push({ kind: 'fill', color: '#fb7185', label: 'No-Fly' });
-      if (noDeployZones.length > 0) legendItems.push({ kind: 'fill', color: '#a78bfa', label: 'No-Deploy' });
-      legendItems.push({ kind: 'station', color: '#f59e0b', label: 'Station' });
+      if (areaPolygon) legendItems.push({ kind: 'line', color: '#dce6ef', label: 'Operational Area' });
+      if (noFlyZones.length > 0) legendItems.push({ kind: 'fill', color: '#e38b95', label: 'No-Fly' });
+      if (noDeployZones.length > 0) legendItems.push({ kind: 'fill', color: '#b79cf2', label: 'No-Deploy' });
+      legendItems.push({ kind: 'station', color: '#dce6ef', label: 'Station' });
       for (const cat of incidentCategories) {
         legendItems.push({ kind: 'dot', color: cat.color, label: cat.name });
       }
