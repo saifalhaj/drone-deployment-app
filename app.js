@@ -782,7 +782,7 @@
 
     if (!curve.k || curve.k.length === 0) {
       ctx.fillStyle = palette.muted;
-      ctx.font = '11px IBM Plex Mono, monospace';
+      ctx.font = '11px JetBrains Mono, monospace';
       ctx.textAlign = 'center';
       ctx.fillText('No data', cssW / 2, cssH / 2);
       return;
@@ -799,13 +799,13 @@
 
     // Title
     ctx.fillStyle = palette.text;
-    ctx.font = '600 10px IBM Plex Sans, sans-serif';
+    ctx.font = '600 10px Inter, sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText(opts.title || '', padL, 12);
     // Final value, right-aligned
     if (series.length > 0) {
       ctx.fillStyle = opts.lineColor || palette.line;
-      ctx.font = '600 11px IBM Plex Mono, monospace';
+      ctx.font = '600 11px JetBrains Mono, monospace';
       ctx.textAlign = 'right';
       ctx.fillText(series[series.length - 1].toFixed(1) + '%', cssW - padR, 12);
     }
@@ -814,7 +814,7 @@
     ctx.strokeStyle = palette.grid;
     ctx.lineWidth = 0.5;
     ctx.fillStyle = palette.muted;
-    ctx.font = '9px IBM Plex Mono, monospace';
+    ctx.font = '9px JetBrains Mono, monospace';
     ctx.textAlign = 'right';
     for (const yVal of [0, 25, 50, 75, 100]) {
       const y = padT + plotH - (yVal / yMax) * plotH;
@@ -837,7 +837,7 @@
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = palette.muted;
-      ctx.font = '8px IBM Plex Mono, monospace';
+      ctx.font = '8px JetBrains Mono, monospace';
       ctx.textAlign = 'left';
       ctx.fillText('target ' + target + '%', padL + 4, ty - 2);
     }
@@ -867,7 +867,7 @@
 
     // X-axis: station counts (skip labels if too crowded)
     ctx.fillStyle = palette.muted;
-    ctx.font = '9px IBM Plex Mono, monospace';
+    ctx.font = '9px JetBrains Mono, monospace';
     ctx.textAlign = 'center';
     const labelStep = Math.max(1, Math.ceil(n / 10));
     for (let i = 0; i < n; i += labelStep) {
@@ -909,11 +909,117 @@
 
   function setPanelState(panelId, state) {
     const el = document.getElementById(panelId);
+    if (!el) return;
     el.classList.remove('active', 'done');
     if (state) el.classList.add(state);
   }
 
-  function setFooter(text) { document.getElementById('footerStatus').textContent = text; }
+  function setFooter(text) {
+    const footer = document.getElementById('footerStatus');
+    if (footer) footer.textContent = String(text || 'Idle').toUpperCase();
+    syncBottomDock();
+  }
+
+  function syncBottomDock() {
+    const pairs = [
+      ['dockArea', 'm-area'],
+      ['dockIncidents', 'm-incidents'],
+      ['dockSites', 'm-stations'],
+      ['dockUnits', 'm-units']
+    ];
+    for (const [dockId, sourceId] of pairs) {
+      const dock = document.getElementById(dockId);
+      const source = document.getElementById(sourceId);
+      if (dock && source) dock.textContent = (source.textContent || '-').trim() || '-';
+    }
+  }
+
+  function syncStepNavButtons() {
+    const step1 = document.getElementById('continueStep1');
+    const step2 = document.getElementById('continueStep2');
+    const step3 = document.getElementById('continueStep3');
+    if (step1) step1.disabled = !areaPolygon;
+    if (step2) step2.disabled = incidents.length === 0;
+    if (step3) step3.disabled = stations.length === 0;
+  }
+
+  function updateWorkflowChrome(step) {
+    const app = document.getElementById('app');
+    if (app) app.dataset.step = String(step);
+    document.querySelectorAll('.rail-step').forEach(btn => {
+      const n = parseInt(btn.dataset.stepJump, 10);
+      btn.classList.toggle('active', n === step);
+      btn.classList.toggle('done', n < step);
+      const num = btn.querySelector('.rail-num');
+      if (num) num.textContent = String(n).padStart(2, '0');
+    });
+    const fill = document.getElementById('railProgressFill');
+    if (fill) fill.style.width = `${Math.max(1, Math.min(4, step)) * 25}%`;
+    const progress = document.getElementById('railProgressText');
+    if (progress) progress.textContent = `${step}/4 - ${step * 25}%`;
+    const dockStep = document.getElementById('dockStep');
+    if (dockStep) dockStep.textContent = String(step).padStart(2, '0');
+    syncBottomDock();
+    syncStepNavButtons();
+  }
+
+  function activateWorkflowStep(step) {
+    ['panel1', 'panel2', 'panel3', 'panel4'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.remove('active');
+    });
+    if (step <= 1) document.getElementById('panel1').classList.add('active');
+    else if (step === 2) document.getElementById('panel2').classList.add('active');
+    else if (step === 3) document.getElementById('panel3').classList.add('active');
+    else document.getElementById('panel4').classList.add('active');
+    updateWorkflowChrome(step);
+  }
+
+  document.querySelectorAll('.rail-step').forEach(btn => {
+    btn.onclick = () => activateWorkflowStep(parseInt(btn.dataset.stepJump, 10));
+  });
+
+  document.getElementById('continueStep1').onclick = () => {
+    if (!areaPolygon) {
+      alert('Define an operational area before continuing.');
+      return;
+    }
+    activateWorkflowStep(2);
+  };
+  document.getElementById('continueStep2').onclick = () => {
+    if (incidents.length === 0) {
+      alert('Generate or upload incident data before continuing.');
+      return;
+    }
+    activateWorkflowStep(3);
+  };
+  document.getElementById('continueStep3').onclick = () => {
+    if (stations.length === 0) {
+      alert('Compute the deployment before continuing to report handoff.');
+      return;
+    }
+    activateWorkflowStep(4);
+  };
+  document.getElementById('backStep2').onclick = () => activateWorkflowStep(1);
+  document.getElementById('backStep3').onclick = () => activateWorkflowStep(2);
+  document.getElementById('backStep4').onclick = () => activateWorkflowStep(3);
+
+  updateWorkflowChrome(1);
+  setInterval(() => {
+    const el = document.getElementById('utcClock');
+    if (!el) return;
+    const now = new Date();
+    el.textContent = now.toLocaleString('en-GB', {
+      timeZone: 'UTC',
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).replace(',', '').toUpperCase() + 'Z';
+  }, 1000);
 
   // ============ INCIDENT GENERATION ============
   // ============ TIMESTAMP GENERATION ============
@@ -1466,7 +1572,7 @@
     stationLayer.clearLayers();
     coverageLayer.clearLayers();
     stations.forEach((s, idx) => {
-      const color = s.color || '#dce6ef';
+      const color = s.color || '#7CDCE8';
       const radius = s.radius || 1000;
       const units = s.units || 1;
       const shortfall = s.shortfall || 0;
@@ -1475,13 +1581,13 @@
         radius: radius,
         color: color,
         fillColor: color,
-        fillOpacity: 0.06,
-        weight: 1,
-        dashArray: '4,5'
+        fillOpacity: 0.05,
+        weight: 0.7,
+        dashArray: '2,3'
       }).addTo(coverageLayer);
 
       const badge = units > 1
-        ? `<div style="position:absolute;top:-7px;right:-12px;background:#020609;color:${color};border:1.5px solid ${color};font-family:'IBM Plex Mono';font-size:9px;font-weight:700;padding:1px 5px;border-radius:9px;line-height:1.2;letter-spacing:0.3px;">×${units}</div>`
+        ? `<div style="position:absolute;top:-7px;right:-12px;background:#020609;color:${color};border:1.5px solid ${color};font-family:'JetBrains Mono';font-size:9px;font-weight:700;padding:1px 5px;border-radius:9px;line-height:1.2;letter-spacing:0.3px;">×${units}</div>`
         : '';
       const warn = shortfall > 0
         ? `<div title="Under-allocated by ${shortfall}" style="position:absolute;bottom:-5px;left:-5px;background:#e38b95;width:9px;height:9px;border-radius:50%;border:1.5px solid #020609;box-shadow:0 0 6px rgba(227,139,149,0.7);"></div>`
@@ -1489,7 +1595,7 @@
 
       const icon = L.divIcon({
         html: `<div style="position:relative;width:22px;height:22px;">
-                 <div style="background:${color};border:3px solid #020609;width:22px;height:22px;border-radius:50%;box-shadow:0 0 12px ${color}99;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono';font-size:10px;font-weight:600;color:#020609;">${idx + 1}</div>
+                 <div style="background:#06080B;border:1.5px solid ${color};width:22px;height:22px;border-radius:50%;box-shadow:0 0 12px ${color}55;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono';font-size:9px;font-weight:600;color:${color};">${idx + 1}</div>
                  ${badge}
                  ${warn}
                </div>`,
@@ -1595,9 +1701,9 @@
     if (polygonPoints.length === 0) return;
     const pts = hoverPoint ? polygonPoints.concat([hoverPoint, polygonPoints[0]]) : polygonPoints.slice();
     if (pts.length >= 2) {
-      tempPreview = L.polyline(pts, { color: '#dce6ef', weight: 2, dashArray: '4,5', opacity: 0.85 }).addTo(map);
+      tempPreview = L.polyline(pts, { color: '#7CDCE8', weight: 1.5, dashArray: '4,4', opacity: 0.9 }).addTo(map);
     } else {
-      tempPreview = L.circleMarker(pts[0], { radius: 4, color: '#dce6ef', fillColor: '#dce6ef', fillOpacity: 1 }).addTo(map);
+      tempPreview = L.circleMarker(pts[0], { radius: 4, color: '#7CDCE8', fillColor: '#7CDCE8', fillOpacity: 1 }).addTo(map);
     }
   }
   function onPolyFinish(e) {
@@ -1609,17 +1715,17 @@
     const pts = polygonPoints.slice();
     const target = window.__drawTarget || 'area';
     if (target === 'nofly') {
-      const poly = L.polygon(pts, { color: '#e38b95', weight: 2 });
+      const poly = L.polygon(pts, { color: '#FF6B7E', weight: 1.5 });
       exitDrawing();
       addNoFlyZone(poly);
       setFooter('No-fly zone added');
     } else if (target === 'nodeploy') {
-      const poly = L.polygon(pts, { color: '#b79cf2', weight: 2 });
+      const poly = L.polygon(pts, { color: '#E8A744', weight: 1.5 });
       exitDrawing();
       addNoDeployZone(poly);
       setFooter('No-deploy zone added');
     } else {
-      const poly = L.polygon(pts, { color: '#dce6ef', weight: 2, fillOpacity: 0.05 });
+      const poly = L.polygon(pts, { color: '#7CDCE8', weight: 1.5, dashArray: '4,4', fillColor: '#7CDCE8', fillOpacity: 0.12 });
       exitDrawing();
       handleAreaCreated(poly);
     }
@@ -1633,7 +1739,7 @@
   function onRectMove(e) {
     if (!rectStart) return;
     if (tempRect) map.removeLayer(tempRect);
-    tempRect = L.rectangle([rectStart, e.latlng], { color: '#dce6ef', weight: 2, fillOpacity: 0.05, dashArray: '4,5' }).addTo(map);
+    tempRect = L.rectangle([rectStart, e.latlng], { color: '#7CDCE8', weight: 1.5, fillColor: '#7CDCE8', fillOpacity: 0.12, dashArray: '4,4' }).addTo(map);
   }
   function onRectUp(e) {
     if (!rectStart) return;
@@ -1645,7 +1751,7 @@
       setFooter('Rectangle too small — try again');
       return;
     }
-    const rect = L.rectangle(bounds, { color: '#dce6ef', weight: 2, fillOpacity: 0.05 });
+    const rect = L.rectangle(bounds, { color: '#7CDCE8', weight: 1.5, dashArray: '4,4', fillColor: '#7CDCE8', fillOpacity: 0.12 });
     exitDrawing();
     handleAreaCreated(rect);
   }
@@ -1700,8 +1806,8 @@
     document.getElementById('m-units').textContent = '—';
     document.getElementById('m-kpi').textContent = '—';
 
-    setPanelState('panel1', 'done');
-    setPanelState('panel2', 'active');
+    setPanelState('panel1', 'active');
+    setPanelState('panel2', null);
     setPanelState('panel3', null);
     document.getElementById('generateBtn').disabled = false;
     document.getElementById('optimizeBtn').disabled = true;
@@ -1714,6 +1820,7 @@
     document.getElementById('status3').classList.remove('good');
     const dlArea = document.getElementById('downloadArea');
     if (dlArea) dlArea.disabled = false;
+    syncStepNavButtons();
     setFooter('Area defined');
   }
 
@@ -1766,8 +1873,8 @@
 
     renderIncidents(null);
 
-    setPanelState('panel2', 'done');
-    setPanelState('panel3', 'active');
+    setPanelState('panel2', 'active');
+    setPanelState('panel3', null);
     document.getElementById('optimizeBtn').disabled = false;
 
     document.getElementById('status2').textContent = `${incidents.length} incidents · ${mode}`;
@@ -1781,6 +1888,7 @@
     document.getElementById('m-units').textContent = '—';
     document.getElementById('m-kpi').textContent = '—';
     updateIncidentStats({ realTimestamps: false });
+    syncStepNavButtons();
     setFooter(`${incidents.length} incidents placed`);
   };
 
@@ -1925,6 +2033,7 @@
 
         document.getElementById('optimizeBtn').disabled = false;
         document.getElementById('optimizeBtn').textContent = 'Re-compute';
+        syncStepNavButtons();
         setFooter(`Deployment ready · ${stations.length} stations`);
       } catch (err) {
         console.error('Optimization error:', err);
@@ -2536,7 +2645,7 @@
 
   // ============ NO-FLY ZONE MANAGEMENT ============
   function addNoFlyZone(polygon) {
-    polygon.setStyle({ color: '#e38b95', weight: 2, fillColor: '#e38b95', fillOpacity: 0.15, dashArray: '4,4' });
+    polygon.setStyle({ color: '#FF6B7E', weight: 1.5, fillColor: '#FF6B7E', fillOpacity: 0.15, dashArray: null });
     noFlyLayer.addLayer(polygon);
     noFlyZones.push(polygon);
     __noFlyCache = []; // invalidate
@@ -2565,7 +2674,7 @@
   }
 
   function addNoDeployZone(polygon) {
-    polygon.setStyle({ color: '#b79cf2', weight: 2, fillColor: '#b79cf2', fillOpacity: 0.12, dashArray: '6,3' });
+    polygon.setStyle({ color: '#E8A744', weight: 1.5, fillColor: '#E8A744', fillOpacity: 0.15, dashArray: '4,4' });
     noDeployLayer.addLayer(polygon);
     noDeployZones.push(polygon);
     __noDeployCache = [];
@@ -2594,7 +2703,7 @@
   }
 
   function addWaterZone(polygon) {
-    polygon.setStyle({ color: '#4ea7c8', weight: 2, fillColor: '#4ea7c8', fillOpacity: 0.16, dashArray: '3,4' });
+    polygon.setStyle({ color: '#7CDCE8', weight: 1.5, fillColor: '#7CDCE8', fillOpacity: 0.12, dashArray: '2,3' });
     waterLayer.addLayer(polygon);
     waterZones.push(polygon);
     __waterCache = [];
@@ -2780,7 +2889,7 @@
     const feature = boundaryFeatures[parseInt(select.value, 10)];
     const ring = chooseLargestRing(feature);
     if (!ring) return;
-    const layer = L.polygon(ring.map(pt => [pt.lat, pt.lng]), { color: '#dce6ef', weight: 2, fillOpacity: 0.05 });
+    const layer = L.polygon(ring.map(pt => [pt.lat, pt.lng]), { color: '#7CDCE8', weight: 1.5, dashArray: '4,4', fillColor: '#7CDCE8', fillOpacity: 0.12 });
     handleAreaCreated(layer);
     map.fitBounds(layer.getBounds(), { padding: [20, 20] });
     const name = boundaryName(feature);
@@ -3030,7 +3139,7 @@
     const feature = selectedBoundaryFeature();
     const ring = chooseLargestRing(feature);
     if (!ring) return;
-    const layer = L.polygon(ring.map(pt => [pt.lat, pt.lng]), { color: '#dce6ef', weight: 2, fillOpacity: 0.05 });
+    const layer = L.polygon(ring.map(pt => [pt.lat, pt.lng]), { color: '#7CDCE8', weight: 1.5, dashArray: '4,4', fillColor: '#7CDCE8', fillOpacity: 0.12 });
     handleAreaCreated(layer);
     map.fitBounds(layer.getBounds(), { padding: [20, 20] });
     const name = boundaryName(feature);
@@ -3058,7 +3167,7 @@
       for (const p of polys) {
         if (p.length > maxPts) { chosen = p; maxPts = p.length; }
       }
-      const layer = L.polygon(chosen.map(pt => [pt.lat, pt.lng]), { color: '#dce6ef', weight: 2, fillOpacity: 0.05 });
+      const layer = L.polygon(chosen.map(pt => [pt.lat, pt.lng]), { color: '#7CDCE8', weight: 1.5, dashArray: '4,4', fillColor: '#7CDCE8', fillOpacity: 0.12 });
       handleAreaCreated(layer);
       map.fitBounds(layer.getBounds(), { padding: [20, 20] });
       setFooter('Area loaded from ' + file.name);
@@ -3395,7 +3504,7 @@
       }
       ctx.fillStyle = 'rgba(78, 167, 200, 0.14)';
       ctx.fill('evenodd');
-      ctx.strokeStyle = '#4ea7c8';
+      ctx.strokeStyle = '#7CDCE8';
       ctx.lineWidth = 2;
       ctx.setLineDash([6, 4]);
       ctx.stroke();
@@ -3404,17 +3513,17 @@
 
     // 3a. Operational area
     if (areaPolygon) {
-      drawPolygon(areaPolygon, null, '#dce6ef', false);
+      drawPolygon(areaPolygon, null, '#7CDCE8', false);
     }
 
     // 3b. No-fly zones (coral, dashed, translucent fill)
     for (const z of noFlyZones) {
-      drawPolygon(z, 'rgba(227, 139, 149, 0.15)', '#e38b95', true);
+      drawPolygon(z, 'rgba(255, 107, 126, 0.15)', '#FF6B7E', true);
     }
 
     // 3c. No-deploy zones (purple, dashed, translucent fill)
     for (const z of noDeployZones) {
-      drawPolygon(z, 'rgba(183, 156, 242, 0.12)', '#b79cf2', true);
+      drawPolygon(z, 'rgba(232, 167, 68, 0.15)', '#E8A744', true);
     }
 
     // 3d. Water exclusion zones (blue, dashed, translucent fill)
@@ -3472,7 +3581,7 @@
     for (let i = 0; i < stations.length; i++) {
       const s = stations[i];
       const p = ll2px({ lat: s.lat, lng: s.lng });
-      ctx.fillStyle = '#dce6ef';
+      ctx.fillStyle = '#EAF1F8';
       ctx.strokeStyle = '#020609';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
@@ -3737,11 +3846,11 @@
       }
 
       const legendItems = [];
-      if (areaPolygon) legendItems.push({ kind: 'line', color: '#dce6ef', label: 'Operational Area' });
-      if (noFlyZones.length > 0) legendItems.push({ kind: 'fill', color: '#e38b95', label: 'No-Fly' });
-      if (noDeployZones.length > 0) legendItems.push({ kind: 'fill', color: '#b79cf2', label: 'No-Deploy' });
-      if (waterZones.length > 0) legendItems.push({ kind: 'fill', color: '#4ea7c8', label: 'Water' });
-      legendItems.push({ kind: 'station', color: '#dce6ef', label: 'Station' });
+      if (areaPolygon) legendItems.push({ kind: 'line', color: '#7CDCE8', label: 'Operational Area' });
+      if (noFlyZones.length > 0) legendItems.push({ kind: 'fill', color: '#FF6B7E', label: 'No-Fly' });
+      if (noDeployZones.length > 0) legendItems.push({ kind: 'fill', color: '#E8A744', label: 'No-Deploy' });
+      if (waterZones.length > 0) legendItems.push({ kind: 'fill', color: '#7CDCE8', label: 'Water' });
+      legendItems.push({ kind: 'station', color: '#7CDCE8', label: 'Station' });
       for (const cat of incidentCategories) {
         legendItems.push({ kind: 'dot', color: cat.color, label: cat.name });
       }
@@ -4386,8 +4495,8 @@
     stations = [];
     renderIncidents(null);
 
-    setPanelState('panel2', 'done');
-    setPanelState('panel3', 'active');
+    setPanelState('panel2', 'active');
+    setPanelState('panel3', null);
     document.getElementById('optimizeBtn').disabled = false;
 
     const skippedNote = (result.skipped.coord + result.skipped.time > 0)
@@ -4410,6 +4519,7 @@
     document.getElementById('m-kpi').textContent = '—';
 
     updateIncidentStats({ realTimestamps: true, anchorMs: result.anchorMs, spanHours: result.spanHours });
+    syncStepNavButtons();
     setFooter('Loaded ' + incidents.length + ' incidents from ' + file.name);
     hideUploadPreview();
   }
