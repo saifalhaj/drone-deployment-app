@@ -389,10 +389,6 @@
  <p class="help">Runs the time-aware optimizer using your Mission and Toolkit settings, area, and incident pattern. Stations are sized to handle observed concurrent demand - not just average load.</p>
  <button class="btn btn-primary" id="optimizeBtn" disabled>Compute Deployment</button>
  <div class="status-line" id="status3">No deployment computed</div>
- <div class="step-footer">
- <button class="btn btn-ghost" id="backStep3">Back</button>
- <button class="btn btn-primary" id="continueStep3" disabled>Continue to Report</button>
- </div>
  </div>
 
  <div class="panel" id="panel4">
@@ -421,6 +417,15 @@
  </div>
  </div>
  <div class="status-line good">Ready to generate PDF, JSON, CSV, and KMZ handoff files</div>
+ <div class="station-handoff" id="stationHandoffPanel">
+ <div class="top-sites-header"><span>Sites - sorted by demand</span><button class="text-link" type="button" id="exportScheduleBtn">Export CSV</button></div>
+ <div class="station-table" id="stationReportList">
+ <div class="station-empty">Compute deployment to populate station recommendations.</div>
+ </div>
+ <div class="station-detail" id="stationDetailPanel">
+ <div class="station-empty">Select a DFR station from the list to zoom the map and inspect platform, units, response time, and demand mix.</div>
+ </div>
+ </div>
  <div class="step-footer">
  <button class="btn btn-ghost" id="backStep4">Back</button>
  </div>
@@ -459,17 +464,19 @@
  </div>
 
  <div class="marginal-chart" id="marginalChart" style="display:none;">
- <div class="chart-header">Marginal Value per Station</div>
- <p class="chart-desc">Each additional station's contribution. The diminishing-returns shape indicates the point of saturation.</p>
- <canvas id="canvasCov" width="320" height="120"></canvas>
- <canvas id="canvasKpi" width="320" height="120"></canvas>
+ <div class="chart-header">Saturation Curves</div>
+ <canvas id="canvasCov" width="320" height="58"></canvas>
+ <canvas id="canvasKpi" width="320" height="58"></canvas>
  </div>
+
  </div>
 
  <div class="actions-bar">
+ <button class="btn btn-ghost step3-action" id="backStep3">Back</button>
+ <button class="btn btn-secondary step3-action" id="resetBtn">Reset</button>
+ <button class="btn btn-primary step3-action" id="continueStep3" disabled>Continue to Report</button>
  <button class="btn btn-primary" id="reportBtn">Generate PDF</button>
  <button class="btn btn-ghost" id="exportBtn">JSON</button>
- <button class="btn btn-secondary" id="resetBtn">Reset</button>
  </div>
 
  </aside>

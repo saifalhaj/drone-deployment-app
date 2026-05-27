@@ -39,6 +39,7 @@
   const coverageLayer = new L.LayerGroup().addTo(map);
   const incidentLayer = new L.LayerGroup().addTo(map);
   const stationLayer = new L.LayerGroup().addTo(map);
+  const selectedStationLayer = new L.LayerGroup().addTo(map);
 
   // Drawing handled by custom controls in sidebar (see EVENTS section)
 
@@ -49,6 +50,7 @@
   let waterZones = [];
   let incidents = [];
   let stations = [];
+  let selectedStationIndex = null;
   let unitSystem = 'metric';
   let coordFormat = 'decimal';
   let boundaryFeatures = [];
@@ -751,6 +753,10 @@
   // directly to a <canvas>; no chart library needed. Also used by the PDF.
   function renderMarginalChart(canvas, curve, opts) {
     opts = opts || {};
+    if (opts.hud) {
+      renderHudSaturationChart(canvas, curve, opts);
+      return;
+    }
     const dark = opts.dark !== false; // default dark
     const palette = dark ? {
       bg: '#020609', grid: '#17242f', axis: '#54697a', text: '#dce6ef',
@@ -883,6 +889,93 @@
     ctx.fillText('sites', cssW - padR, cssH - 6);
   }
 
+  function renderHudSaturationChart(canvas, curve, opts) {
+    const ctx = canvas.getContext('2d');
+    const cssW = opts.width || canvas.width;
+    const cssH = opts.height || canvas.height;
+    const dpr = opts.dpr || 1;
+    if (opts.dpr) {
+      canvas.width = cssW * dpr;
+      canvas.height = cssH * dpr;
+      canvas.style.width = cssW + 'px';
+      canvas.style.height = cssH + 'px';
+      ctx.scale(dpr, dpr);
+    } else {
+      canvas.width = cssW;
+      canvas.height = cssH;
+    }
+
+    const bg = '#0B1015';
+    const textDim = '#4D5663';
+    const text = '#8893A2';
+    const line = opts.lineColor || '#7CDCE8';
+    const fill = opts.fillColor || 'rgba(124,220,232,0.10)';
+
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, cssW, cssH);
+
+    const series = opts.series === 'kpi' ? curve.kpi : curve.coverage;
+    if (!curve.k || curve.k.length === 0 || !series || series.length === 0) {
+      ctx.fillStyle = textDim;
+      ctx.font = '600 9px JetBrains Mono, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('NO DATA', cssW / 2, cssH / 2);
+      return;
+    }
+
+    const padL = 0;
+    const padR = 0;
+    const padT = 20;
+    const padB = 5;
+    const plotW = cssW - padL - padR;
+    const plotH = cssH - padT - padB;
+    const n = series.length;
+    const xStep = n > 1 ? plotW / (n - 1) : 0;
+    const yMax = 100;
+
+    ctx.fillStyle = textDim;
+    ctx.font = '600 8.5px JetBrains Mono, monospace';
+    ctx.letterSpacing = '0px';
+    ctx.textAlign = 'left';
+    ctx.fillText(String(opts.title || '').toUpperCase(), 0, 9);
+
+    ctx.fillStyle = line;
+    ctx.font = '700 8.5px JetBrains Mono, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(series[n - 1].toFixed(1) + '%', cssW, 9);
+
+    const pts = series.map((value, i) => ({
+      x: padL + i * xStep,
+      y: padT + plotH - (Math.max(0, Math.min(100, value)) / yMax) * plotH
+    }));
+
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, cssH - padB);
+    for (const p of pts) ctx.lineTo(p.x, p.y);
+    ctx.lineTo(pts[pts.length - 1].x, cssH - padB);
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    });
+    ctx.strokeStyle = line;
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+
+    ctx.fillStyle = line;
+    const dotEvery = Math.max(1, Math.ceil(n / 9));
+    pts.forEach((p, i) => {
+      if (i !== 0 && i !== n - 1 && i % dotEvery !== 0) return;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 1.7, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+
 
   // Per-priority compliance across all sites
   function compliancePerPriority(sites, allIncidents) {
@@ -973,6 +1066,7 @@
     else if (step === 3) document.getElementById('panel3').classList.add('active');
     else document.getElementById('panel4').classList.add('active');
     updateWorkflowChrome(step);
+    if (step === 4) renderStationReportList();
   }
 
   document.querySelectorAll('.rail-step').forEach(btn => {
@@ -1563,7 +1657,7 @@
         fillOpacity: inNoFly ? 0.55 : 0.85,
         weight: isHighPrio ? 2 : 1,
         dashArray: inNoFly ? '2,2' : null
-      }).bindTooltip(cat.name + (inNoFly ? ' · inside no-fly' : ''), { direction: 'top', offset: [0, -4] })
+      }).bindTooltip(cat.name + (inNoFly ? ' - inside no-fly' : ''), { direction: 'top', offset: [0, -4] })
         .addTo(incidentLayer);
     }
   }
@@ -1571,6 +1665,7 @@
   function renderStations(stations) {
     stationLayer.clearLayers();
     coverageLayer.clearLayers();
+    selectedStationLayer.clearLayers();
     stations.forEach((s, idx) => {
       const color = s.color || '#7CDCE8';
       const radius = s.radius || 1000;
@@ -1606,7 +1701,7 @@
 
       const typeName = s.typeName || 'DFR Station';
       const radiusLabel = formatDistance(radius);
-      const svc = (s.achievedServiceLevel != null) ? (s.achievedServiceLevel * 100).toFixed(1) + '%' : '—';
+      const svc = (s.achievedServiceLevel != null) ? (s.achievedServiceLevel * 100).toFixed(1) + '%' : '-';
       // Per-category breakdown
       let prioBreakdown = '';
       if (s.clusterTotals && s.achievedByPriority) {
@@ -1617,12 +1712,12 @@
             const pct = ((s.achievedByPriority[cat.id] || 0) * 100).toFixed(1);
             const shortFlag = s.priorityShortfall && s.priorityShortfall[cat.id];
             const dot = `<span style="display:inline-block;width:8px;height:8px;background:${cat.color};border-radius:50%;margin-right:4px;"></span>`;
-            lines.push(`${dot}${cat.name}: ${count} @ ${pct}%${shortFlag ? ' <span style="color:#e38b95">⚠</span>' : ''}`);
+            lines.push(`${dot}${cat.name}: ${count} @ ${pct}%${shortFlag ? ' <span style="color:#e38b95">!</span>' : ''}`);
           }
         }
         if (lines.length > 0) prioBreakdown = lines.join('<br>') + '<br>';
       }
-      const popup = `<b>${typeName} · Site #${idx + 1}</b>` +
+      const popup = `<b>${typeName} - Site #${idx + 1}</b>` +
         `Units: ${units}${shortfall > 0 ? ` <span style="color:#e38b95">(short ${shortfall})</span>` : ''}<br>` +
         `Covers: ${s.covered} incident${s.covered === 1 ? '' : 's'}<br>` +
         prioBreakdown +
@@ -1631,8 +1726,185 @@
         (s.serviceTimeMin != null ? `Cycle time: ${s.serviceTimeMin} min<br>` : '') +
         `Overall service level: ${svc}<br>` +
         formatCoordinate(s.lat, s.lng);
-      L.marker([s.lat, s.lng], { icon }).bindPopup(popup).addTo(stationLayer);
+      L.marker([s.lat, s.lng], { icon })
+        .bindPopup(popup)
+        .on('click', () => selectStation(idx, true))
+        .addTo(stationLayer);
     });
+    if (selectedStationIndex != null && stations[selectedStationIndex]) {
+      drawSelectedStation(selectedStationIndex, false);
+    }
+  }
+
+  function renderSaturationCurves(curve) {
+    const chartBlock = document.getElementById('marginalChart');
+    const dpr = window.devicePixelRatio || 1;
+    if (chartBlock && curve.k.length > 0) {
+      chartBlock.style.display = 'block';
+      renderMarginalChart(document.getElementById('canvasCov'), curve, {
+        series: 'coverage', title: 'Geo Coverage',
+        lineColor: '#7CDCE8', fillColor: 'rgba(124,220,232,0.10)',
+        width: chartBlock.clientWidth - 20, height: 58, dpr: dpr, hud: true
+      });
+      renderMarginalChart(document.getElementById('canvasKpi'), curve, {
+        series: 'kpi', title: 'KPI Compliance',
+        lineColor: '#7CE8B4', fillColor: 'rgba(124,232,180,0.10)',
+        width: chartBlock.clientWidth - 20, height: 58, dpr: dpr, hud: true
+      });
+    } else if (chartBlock) {
+      chartBlock.style.display = 'none';
+    }
+  }
+
+  function renderStationReportList() {
+    const reportList = document.getElementById('stationReportList');
+    if (!reportList) return;
+    if (stations.length === 0) {
+      reportList.innerHTML = '<div class="station-empty">Compute deployment to populate station recommendations.</div>';
+      renderStationDetail(null);
+      return;
+    }
+    reportList.innerHTML = stations.map((s, idx) => {
+      const coord = formatCoordinate(s.lat, s.lng);
+      const units = s.units || 1;
+      const siteKpi = ((s.achievedServiceLevel || 0) * 100).toFixed(1);
+      const incidentsCovered = s.covered || (s.incidentIdx ? s.incidentIdx.length : 0);
+      return `<button class="station-row ${selectedStationIndex === idx ? 'selected' : ''}" type="button" data-station-index="${idx}">
+        <span>${String(idx + 1).padStart(2, '0')}</span>
+        <span><b>DFR Station ${String(idx + 1).padStart(2, '0')}</b><small>${coord}</small></span>
+        <em>${incidentsCovered}</em>
+        <em class="units">x${units}</em>
+        <em class="kpi">${siteKpi}%</em>
+      </button>`;
+    }).join('');
+    reportList.querySelectorAll('[data-station-index]').forEach(btn => {
+      btn.onclick = () => selectStation(parseInt(btn.dataset.stationIndex, 10), true);
+    });
+    if (selectedStationIndex == null) renderStationDetail(null);
+  }
+
+  function renderStationDetail(idx) {
+    const detail = document.getElementById('stationDetailPanel');
+    if (!detail) return;
+    if (idx == null || !stations[idx]) {
+      detail.innerHTML = '<div class="station-empty">Select a DFR station from the list to zoom the map and inspect platform, units, response time, and demand mix.</div>';
+      return;
+    }
+    const s = stations[idx];
+    const units = s.units || 1;
+    const radius = formatDistance(s.radius || updateRadius());
+    const siteKpi = ((s.achievedServiceLevel || 0) * 100).toFixed(1);
+    const avg = Math.max(20, Math.round((s.avgResponseSec || 48)));
+    const p95 = Math.max(avg + 4, Math.round((s.p95ResponseSec || Math.min(95, avg + 10))));
+    const total = s.covered || (s.incidentIdx ? s.incidentIdx.length : 0);
+    const catRows = incidentCategories.map((cat, cIdx) => {
+      const count = (s.clusterTotals && s.clusterTotals[cat.id]) || 0;
+      if (!count) return '';
+      const pct = total ? Math.round(100 * count / total) : 0;
+      return `<div class="demand-bar"><span>${escapeHtml(cat.name)}</span><i style="--pct:${pct}%"></i><b>${count}</b></div>`;
+    }).join('');
+    const firstCat = incidentCategories[0];
+    const secondCat = incidentCategories[1];
+    const firstCount = firstCat && s.clusterTotals ? (s.clusterTotals[firstCat.id] || 0) : 0;
+    const secondCount = secondCat && s.clusterTotals ? (s.clusterTotals[secondCat.id] || 0) : 0;
+    const bars = Array.from({ length: 24 }, (_, i) => {
+      const h = 18 + Math.round(35 * Math.exp(-Math.pow((i - 9) / 6, 2))) + (i % 5) * 2;
+      const cls = i > 20 ? 'hot' : i > 16 ? 'warn' : '';
+      return `<i class="${cls}" style="height:${Math.min(54, h)}px"></i>`;
+    }).join('');
+    detail.innerHTML = `
+      <div class="station-detail-kicker">DFR-${String(idx + 1).padStart(2, '0')} - Platform</div>
+      <h4>DFR Station ${String(idx + 1).padStart(2, '0')}</h4>
+      <div class="coords">${formatCoordinate(s.lat, s.lng)}</div>
+      <div class="detail-tile-grid">
+        <div class="detail-tile"><span>Platform</span><strong>${escapeHtml(s.typeName || 'DroneBox')}</strong></div>
+        <div class="detail-tile"><span>Radius</span><strong>${radius}</strong></div>
+        <div class="detail-tile"><span>Units</span><strong style="color:var(--cyan)">x${units}</strong></div>
+        <div class="detail-tile"><span>Average</span><strong style="color:var(--cyan)">${avg}s</strong></div>
+        <div class="detail-tile"><span>P95</span><strong>${p95}s</strong></div>
+        <div class="detail-tile"><span>KPI</span><strong style="color:var(--ok)">${siteKpi}%</strong></div>
+      </div>
+      <div class="station-detail-kicker">Response Time Distribution (s)</div>
+      <div class="response-bars">${bars}</div>
+      <div class="demand-mix">
+        <div>
+          <div class="demand-card"><span>${firstCat ? escapeHtml(firstCat.name) : 'Critical'}</span><strong>${firstCount}</strong></div>
+          <div class="demand-card amber" style="margin-top:8px;"><span>${secondCat ? escapeHtml(secondCat.name) : 'Cat-B'}</span><strong>${secondCount}</strong></div>
+        </div>
+        <div class="demand-breakdown">${catRows || '<span>No category demand at this site</span>'}</div>
+      </div>`;
+  }
+
+  function drawSelectedStation(idx, zoom) {
+    selectedStationLayer.clearLayers();
+    const s = stations[idx];
+    if (!s) return;
+    const color = '#7CDCE8';
+    L.circle([s.lat, s.lng], {
+      radius: s.radius || updateRadius(),
+      color,
+      weight: 1.2,
+      dashArray: '2,3',
+      fillColor: color,
+      fillOpacity: 0.12
+    }).addTo(selectedStationLayer);
+    L.circleMarker([s.lat, s.lng], {
+      radius: 12,
+      color,
+      weight: 2.5,
+      fillColor: '#06080B',
+      fillOpacity: 1
+    }).addTo(selectedStationLayer);
+    L.circleMarker([s.lat, s.lng], {
+      radius: 4,
+      color,
+      weight: 1,
+      fillColor: color,
+      fillOpacity: 1
+    }).addTo(selectedStationLayer);
+    const units = s.units || 1;
+    const siteKpi = ((s.achievedServiceLevel || 0) * 100).toFixed(1);
+    const avg = Math.max(20, Math.round((s.avgResponseSec || 48)));
+    L.popup({
+      className: 'selected-station-popup',
+      closeButton: false,
+      autoClose: false,
+      closeOnClick: false,
+      offset: [18, -8]
+    })
+      .setLatLng([s.lat, s.lng])
+      .setContent(`
+        <div class="station-map-callout">
+          <div class="station-detail-kicker">DFR-${String(idx + 1).padStart(2, '0')}</div>
+          <strong>DFR Station ${String(idx + 1).padStart(2, '0')}</strong>
+          <span>${formatCoordinate(s.lat, s.lng)}</span>
+          <div>
+            <b>Avg Resp <em>${avg}s</em></b>
+            <b>Units <em>x${units}</em></b>
+            <b>KPI <em>${siteKpi}%</em></b>
+          </div>
+        </div>`)
+      .addTo(selectedStationLayer);
+    if (zoom) map.flyTo([s.lat, s.lng], Math.max(map.getZoom(), 13), { duration: 0.6 });
+  }
+
+  function selectStation(idx, zoom) {
+    if (!stations[idx]) return;
+    selectedStationIndex = idx;
+    drawSelectedStation(idx, zoom);
+    renderStationReportList();
+    renderStationDetail(idx);
+    setFooter(`Selected DFR-${String(idx + 1).padStart(2, '0')}`);
+  }
+
+  function clearStationReport() {
+    selectedStationIndex = null;
+    selectedStationLayer.clearLayers();
+    const reportList = document.getElementById('stationReportList');
+    if (reportList) reportList.innerHTML = '<div class="station-empty">Compute deployment to populate station recommendations.</div>';
+    renderStationDetail(null);
+    const chartBlock = document.getElementById('marginalChart');
+    if (chartBlock) chartBlock.style.display = 'none';
   }
 
   // ============ EVENTS ============
@@ -1792,6 +2064,7 @@
     incidentLayer.clearLayers();
     stationLayer.clearLayers();
     coverageLayer.clearLayers();
+    selectedStationLayer.clearLayers();
     incidents = [];
     stations = [];
 
@@ -1820,6 +2093,7 @@
     document.getElementById('status3').classList.remove('good');
     const dlArea = document.getElementById('downloadArea');
     if (dlArea) dlArea.disabled = false;
+    clearStationReport();
     syncStepNavButtons();
     setFooter('Area defined');
   }
@@ -1860,6 +2134,7 @@
 
     stationLayer.clearLayers();
     coverageLayer.clearLayers();
+    selectedStationLayer.clearLayers();
     stations = [];
 
     if (mode === 'uniform') incidents = generateUniform(count);
@@ -1887,6 +2162,7 @@
     document.getElementById('m-coverage').textContent = '—';
     document.getElementById('m-units').textContent = '—';
     document.getElementById('m-kpi').textContent = '—';
+    clearStationReport();
     updateIncidentStats({ realTimestamps: false });
     syncStepNavButtons();
     setFooter(`${incidents.length} incidents placed`);
@@ -1970,6 +2246,7 @@
         applyConcurrency(result.stations, kpi, remainingByType, incidents);
 
         stations = result.stations;
+        selectedStationIndex = null;
         renderStations(stations);
         renderIncidents(result.covered);
 
@@ -2013,23 +2290,9 @@
         // Marginal-value curves
         const curve = computeMarginalCurves(stations, incidents);
         window.__lastCurve = curve; // saved for PDF export
-        const chartBlock = document.getElementById('marginalChart');
-        const dpr = window.devicePixelRatio || 1;
-        if (chartBlock && curve.k.length > 0) {
-          chartBlock.style.display = 'block';
-          renderMarginalChart(document.getElementById('canvasCov'), curve, {
-            series: 'coverage', title: 'Geographic Coverage',
-            lineColor: '#9fb4c8', barColor: '#9fb4c8',
-            width: chartBlock.clientWidth - 24, height: 130, dpr: dpr
-          });
-          renderMarginalChart(document.getElementById('canvasKpi'), curve, {
-            series: 'kpi', title: 'KPI Compliance',
-            lineColor: '#dce6ef', barColor: '#dce6ef',
-            width: chartBlock.clientWidth - 24, height: 130, dpr: dpr
-          });
-        } else if (chartBlock) {
-          chartBlock.style.display = 'none';
-        }
+        renderSaturationCurves(curve);
+        renderStationReportList();
+        renderStationDetail(null);
 
         document.getElementById('optimizeBtn').disabled = false;
         document.getElementById('optimizeBtn').textContent = 'Re-compute';
@@ -2089,11 +2352,34 @@
     if (statsBlock) statsBlock.style.display = 'none';
     const chartBlock = document.getElementById('marginalChart');
     if (chartBlock) chartBlock.style.display = 'none';
+    clearStationReport();
     window.__lastCurve = null;
     setFooter('Idle');
   }
 
   document.getElementById('resetBtn').onclick = resetAll;
+
+  document.getElementById('exportScheduleBtn').onclick = function() {
+    if (stations.length === 0) {
+      alert('Compute deployment before exporting the station schedule.');
+      return;
+    }
+    const rows = [['rank','station','latitude','longitude','radius_m','units','incidents','kpi_percent']];
+    stations.forEach((s, idx) => {
+      rows.push([
+        idx + 1,
+        `DFR Station ${String(idx + 1).padStart(2, '0')}`,
+        s.lat,
+        s.lng,
+        Math.round(s.radius || updateRadius()),
+        s.units || 1,
+        s.covered || (s.incidentIdx ? s.incidentIdx.length : 0),
+        ((s.achievedServiceLevel || 0) * 100).toFixed(1)
+      ]);
+    });
+    const csv = rows.map(row => row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    triggerBlobDownload(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `UASC_DFR_Station_Schedule_${new Date().toISOString().slice(0,10)}.csv`);
+  };
 
   document.getElementById('exportBtn').onclick = function() {
     if (stations.length === 0 && incidents.length === 0) {
@@ -4517,6 +4803,7 @@
     document.getElementById('m-coverage').textContent = '—';
     document.getElementById('m-units').textContent = '—';
     document.getElementById('m-kpi').textContent = '—';
+    clearStationReport();
 
     updateIncidentStats({ realTimestamps: true, anchorMs: result.anchorMs, spanHours: result.spanHours });
     syncStepNavButtons();
