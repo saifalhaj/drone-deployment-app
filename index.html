@@ -1,682 +1,126 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DFR Deployment Planner</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<title>DFR Deployment Planner - Home</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="home.css">
 </head>
 <body>
-<div id="app">
- <header class="mission-bar">
- <div class="brand">
- <img class="uasc-logo" id="uascLogoHeader" alt="UASC">
- <div>
- <h1>DFR Deployment Planner</h1>
- <div class="sub">DRONE-AS-FIRST-RESPONDER - PLANNING SUITE</div>
- </div>
- </div>
- <div class="header-status">
- <div class="mission-strip">
- <span><b>OP //</b> OP-2026-0341</span>
- <span><b>TS //</b> <span id="utcClock">UTC --:--:--</span></span>
- <span><b>OPR //</b> CMD/UASC</span>
- <span><b>CLS //</b> CONFIDENTIAL</span>
- </div>
- <button class="about-btn" id="aboutBtn" title="About this tool">ABOUT</button>
- <div class="system-state"><span class="status-dot live" id="systemDot"></span>SYSTEM READY</div>
- </div>
- </header>
+<div class="home-shell">
+  <header class="home-mission-bar">
+    <a class="home-brand" href="planner/" aria-label="Open DFR Deployment Planner">
+      <img src="assets/uasc-logo.png" alt="UASC" class="home-logo">
+      <div class="brand-copy">
+        <span>Unmanned Aerial Systems Center</span>
+        <em>Dubai Police</em>
+      </div>
+    </a>
+    <div class="product-title">
+      <strong>DFR Deployment Planner</strong>
+      <span>DRONE-AS-FIRST-RESPONDER · PLANNING SUITE</span>
+    </div>
+    <div class="mission-strip">
+      <span><b>OP //</b> OP-DXB-2026-0341</span>
+      <span><b>TS //</b> <span id="homeUtcClock">UTC --:--:--</span></span>
+      <span><b>OPR //</b> CMD/UASC</span>
+      <span><b>CLS //</b> CONFIDENTIAL</span>
+    </div>
+    <a class="home-about" href="planner/#about">ABOUT</a>
+    <div class="system-ready"><span></span>SYSTEM READY</div>
+  </header>
 
- <main>
- <nav id="stepRail" aria-label="Planning workflow">
- <div class="rail-head">
- <span>Planning Workflow</span>
- <strong>Mission Build</strong>
- </div>
- <button class="rail-step active" data-step-jump="1" type="button">
- <span class="rail-num">01</span>
- <span><b>AREA</b><strong>Operational Area</strong><em>Draw - upload - constraints</em></span>
- </button>
- <button class="rail-step" data-step-jump="2" type="button">
- <span class="rail-num">02</span>
- <span><b>DEMAND</b><strong>Incident Data</strong><em>KPIs - distribution - upload</em></span>
- </button>
- <button class="rail-step" data-step-jump="3" type="button">
- <span class="rail-num">03</span>
- <span><b>COMPUTE</b><strong>Deployment Plan</strong><em>Sites - units - coverage</em></span>
- </button>
- <button class="rail-step" data-step-jump="4" type="button">
- <span class="rail-num">04</span>
- <span><b>EXPORT</b><strong>Report & Handoff</strong><em>PDF - JSON - schedule</em></span>
- </button>
- <div class="rail-progress">
- <div class="rail-progress-bar"><span id="railProgressFill"></span></div>
- <span id="railProgressText">1/4 - 25%</span>
- </div>
- </nav>
- <div id="map"></div>
- <aside id="sidebar">
+  <main class="home-main">
+    <section class="home-narrative">
+      <div class="grid-bg" aria-hidden="true"></div>
+      <div class="narrative-inner">
+        <div class="build-row">
+          <span class="tag-chip">v2.4.1 · BUILD 9c4a</span>
+          <span class="mono dim">UASC PLANNING SUITE — INTERNAL</span>
+        </div>
+        <h1>
+          Where to put the boxes,<br>
+          <span>how many you need,</span><br>
+          and what they can do.
+        </h1>
+        <p>
+          A planning model for Drone-as-First-Responder programs. Define an
+          area, point at your incident history, and the optimizer returns a
+          defensible site list — sized for concurrent demand, not averages.
+        </p>
+        <div class="home-actions">
+          <a class="btn btn-primary" href="planner/">START NEW MISSION →</a>
+          <button class="btn btn-ghost" type="button">LOAD SAVED PLAN</button>
+          <button class="btn btn-ghost" type="button">WHY THIS TOOL EXISTS</button>
+        </div>
+        <div class="stats-strip" aria-label="Planner stats">
+          <div>
+            <strong>10,000+</strong>
+            <span class="mono">incidents supported since 2020</span>
+          </div>
+          <div>
+            <strong>30+</strong>
+            <span class="mono">agencies briefed</span>
+          </div>
+          <div>
+            <strong class="cyan">&lt; 3 s</strong>
+            <span class="mono">optimizer solve time</span>
+          </div>
+          <div>
+            <strong class="ok">95%</strong>
+            <span class="mono">KPI target compliance</span>
+          </div>
+        </div>
+      </div>
+    </section>
 
- <div class="panel panel-permanent" id="panel-kpi">
- <div class="panel-header">
- <span class="step-tag" style="background: var(--surface-3); color: var(--accent);">TOOLKIT</span>
- <span class="panel-title">Mission and Toolkit</span>
- </div>
- <p class="help">Deployment objective. Use Calculate Required to size from scratch, or Deploy Existing to allocate a known fleet.</p>
- <!-- Time Window moved to Step 02. Service Time moved to platform section. Incident Categories moved to Step 02. -->
- <!-- Legacy hidden inputs preserved for any old code paths that still read them. -->
- <input type="hidden" id="responseTime" value="60">
- <input type="hidden" id="kpiServiceLevel" value="0.95">
+    <aside class="hero-media">
+      <div class="media-header">
+        <span class="mono cyan">HERO MEDIA</span>
+        <i></i>
+        <span class="mono dim">DRAG IMAGE OR VIDEO</span>
+      </div>
 
- <div class="subsection-label" style="margin-top: 6px;">Objective</div>
- <div class="mode-tabs" role="tablist" style="margin-bottom: 10px;">
- <button class="mode-tab active" data-mode="minimize">Calculate Required</button>
- <button class="mode-tab" data-mode="fleet">Deploy Existing</button>
- </div>
+      <div class="hero-slot-frame main-slot">
+        <div class="drop-slot" data-slot-id="home-hero" data-placeholder="Drop hero video / image — drone footage works well"></div>
+        <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+        <div class="hud hud-top mono cyan">● REC · OP-DXB-2026-0341</div>
+        <div class="hud hud-bottom mono">
+          <span>25.21834°N · 55.42012°E</span>
+          <span>ALT 120m · 14:32:07Z</span>
+        </div>
+      </div>
 
- <!-- MINIMIZE MODE -->
- <div id="minimizePanel">
- <div class="field">
- <label class="field-label">Platform</label>
- <select id="minimizePreset">
- <option value="custom" selected>Custom - enter manually</option>
- </select>
- </div>
- <div class="field-row">
- <div class="field">
- <label class="field-label" id="droneSpeedLabel">Speed (m/s)</label>
- <input type="number" id="droneSpeed" value="20" min="5" max="100">
- </div>
- <div class="field">
- <label class="field-label" id="manualRadiusLabel">Radius (m)</label>
- <input type="number" id="manualRadius" placeholder="auto from speed">
- </div>
- </div>
- <div class="field">
- <label class="field-label">Service Time (min)</label>
- <input type="number" id="kpiServiceTime" value="15" min="1" max="180">
- <div class="field-desc">One drone's busy time per call - recharge or swap <span class="field-desc-dim">(longer = more units needed for same demand)</span></div>
- </div>
- <div class="derived">
- <span>Effective Coverage Radius</span>
- <span class="derived-value" id="radiusDisplay">1200 m</span>
- </div>
- <div class="subsection-label" style="margin-top: 12px;">Localization</div>
- <div class="field-row">
- <div class="field">
- <label class="field-label">Units</label>
- <select id="unitSystem">
- <option value="metric" selected>Metric</option>
- <option value="imperial">Imperial</option>
- </select>
- </div>
- <div class="field">
- <label class="field-label">Coordinates</label>
- <select id="coordFormat">
- <option value="decimal" selected>Decimal degrees</option>
- <option value="dms">DMS</option>
- <option value="utm">UTM grid</option>
- </select>
- </div>
- </div>
- <div id="minimizePresetNote" class="type-notes" style="margin-top: 4px;"></div>
- </div>
+      <div class="thumb-grid">
+        <div class="hero-slot-frame">
+          <div class="drop-slot" data-slot-id="home-thumb-1" data-placeholder="Station photo"></div>
+          <span class="corner muted tl"></span><span class="corner muted tr"></span><span class="corner muted bl"></span><span class="corner muted br"></span>
+          <div class="slot-label mono cyan">STN · 01</div>
+        </div>
+        <div class="hero-slot-frame">
+          <div class="drop-slot" data-slot-id="home-thumb-2" data-placeholder="Coverage map screenshot"></div>
+          <span class="corner muted tl"></span><span class="corner muted tr"></span><span class="corner muted bl"></span><span class="corner muted br"></span>
+          <div class="slot-label mono cyan">MAP · OUT</div>
+        </div>
+      </div>
 
- <!-- FLEET MODE -->
- <div id="fleetPanel" style="display:none;">
- <p class="help" style="margin-bottom: 8px;">Declare your fleet - name, coverage radius, count. The optimizer allocates across clusters to maximize coverage and minimize delayed incidents.</p>
- <div class="fleet-list" id="fleetList"></div>
- <button class="btn btn-secondary" id="addTypeBtn">+ Add Drone Type</button>
- <div class="fleet-summary" id="fleetSummary"><strong>0</strong> drones across <strong>0</strong> types</div>
- </div>
- </div>
+      <div class="media-foot">
+        <span class="mono dim">MISSION <b>OP-DXB-2026-0341</b></span>
+        <span class="mono dim">● LIVE PREVIEW</span>
+      </div>
+    </aside>
+  </main>
 
- <div class="panel active" id="panel1">
- <div class="panel-header">
- <span class="step-tag">STEP 01</span>
- <span class="panel-title">Define Operational Area</span>
- </div>
- <p class="help">Choose how to define the operational area. Add <strong>No-Fly Zones</strong> (drones cannot enter) and <strong>No-Deploy Zones</strong> (stations cannot be placed, but drones may still fly through). Each layer can be saved as KMZ for reuse.</p>
-
- <div class="subsection-label">Operational Area</div>
- <div class="mode-tabs area-method-tabs" role="group" aria-label="Operational area source">
- <button class="mode-tab area-method-tab active" data-area-method="draw" type="button">Draw</button>
- <button class="mode-tab area-method-tab" data-area-method="upload" type="button">Upload</button>
- <button class="mode-tab area-method-tab" data-area-method="boundary" type="button">Boundary</button>
- </div>
- <div class="area-method-panel" id="areaMethodDraw">
- <p class="help" style="font-size: 11px;">Manually draw the operational area on the map.</p>
- <div class="field-row" style="margin-bottom: 6px;">
- <button class="btn btn-secondary draw-btn" id="drawRectBtn">Rectangle</button>
- <button class="btn btn-secondary draw-btn" id="drawPolyBtn">Polygon</button>
- </div>
- </div>
- <div class="area-method-panel hidden" id="areaMethodUpload">
- <p class="help" style="font-size: 11px;">Upload an existing operational area from KML, KMZ, GeoJSON, or JSON.</p>
- <div class="upload-area-action">
- <label class="btn btn-secondary upload-area-btn">
- Upload KML / KMZ / GeoJSON
- <input type="file" id="areaFileInput" accept=".kml,.kmz,.geojson,.json" style="display:none;">
- </label>
- </div>
- </div>
- <div class="area-method-panel hidden" id="areaMethodBoundary">
- <div class="subsection-label" style="margin-top: 0;">Boundary Library</div>
- <p class="help" style="font-size: 11px;">Search a country, then optionally narrow to a city or district. Leaving a dropdown blank uses the full parent area.</p>
- <div class="field">
- <label class="field-label">Country</label>
- <input type="text" id="boundaryCountrySearch" list="boundaryCountryList" value="United Arab Emirates (ARE)" placeholder="Type country name or ISO3 code">
- <datalist id="boundaryCountryList"></datalist>
- </div>
- <div class="field">
- <label class="field-label">City / Region</label>
- <select id="boundaryCitySelect" disabled>
- <option value="">Select country first</option>
- </select>
- </div>
- <div class="field">
- <label class="field-label">District</label>
- <select id="boundaryDistrictSelect" disabled>
- <option value="">Select city first</option>
- </select>
- </div>
- <button class="btn btn-primary" id="applyBoundaryBtn" disabled style="margin-bottom: 6px;">Use Selection</button>
- <div class="status-line" id="boundaryStatus">Online source: geoBoundaries open administrative boundaries</div>
- </div>
-
- <button class="btn btn-ghost" id="downloadArea" disabled style="margin-bottom: 6px;">Save KMZ</button>
- <button class="btn btn-ghost" id="clearArea" style="margin-bottom: 4px;">Clear Area</button>
- <div class="status-line" id="status1">Awaiting area selection</div>
-
- <div class="subsection-label" style="margin-top: 14px;">
- <span><span class="layer-swatch" style="background:#FF6B7E;"></span> No-Fly Zones</span>
- <span class="hint">drones can't cross - excludes incidents</span>
- </div>
- <div class="field-row" style="margin-bottom: 6px;">
- <button class="btn btn-secondary draw-btn" id="drawNoFlyBtn">Draw</button>
- <label class="btn btn-secondary" style="text-align:center;cursor:pointer;">
- Upload
- <input type="file" id="noFlyFileInput" accept=".kml,.kmz,.geojson,.json" style="display:none;">
- </label>
- </div>
- <div class="field-row" style="margin-bottom: 6px;">
- <button class="btn btn-ghost" id="clearNoFly">Clear All</button>
- <button class="btn btn-ghost" id="downloadNoFly" disabled>Save KMZ</button>
- </div>
- <div class="status-line" id="statusNoFly">No no-fly zones</div>
-
- <div class="subsection-label" style="margin-top: 14px;">
- <span><span class="layer-swatch" style="background:#E8A744;"></span> No-Deploy Zones</span>
- <span class="hint">stations not allowed - drones may fly</span>
- </div>
- <div class="field-row" style="margin-bottom: 6px;">
- <button class="btn btn-secondary draw-btn" id="drawNoDeployBtn">Draw</button>
- <label class="btn btn-secondary" style="text-align:center;cursor:pointer;">
- Upload
- <input type="file" id="noDeployFileInput" accept=".kml,.kmz,.geojson,.json" style="display:none;">
- </label>
- </div>
- <div class="field-row" style="margin-bottom: 6px;">
- <button class="btn btn-ghost" id="clearNoDeploy">Clear All</button>
- <button class="btn btn-ghost" id="downloadNoDeploy" disabled>Save KMZ</button>
- </div>
- <div class="status-line" id="statusNoDeploy">No no-deploy zones</div>
-
- <div class="subsection-label" style="margin-top: 14px;">
- <span><span class="layer-swatch" style="background:#7CDCE8;"></span> Water Exclusion</span>
- <span class="hint">stations not allowed over water</span>
- </div>
- <p class="help" style="font-size: 11px;">Upload water polygons from Natural Earth, OpenStreetMap/Geofabrik, or local hydrography data. These areas only block station placement.</p>
- <div class="field-row" style="margin-bottom: 6px;">
- <button class="btn btn-secondary" id="loadNaturalEarthWater">Load Built-in Water</button>
- <label class="btn btn-secondary" style="text-align:center;cursor:pointer;">
- Upload Water Layer
- <input type="file" id="waterFileInput" accept=".kml,.kmz,.geojson,.json" style="display:none;">
- </label>
- </div>
- <div class="field-row" style="margin-bottom: 6px;">
- <button class="btn btn-ghost" id="clearWater">Clear All</button>
- <button class="btn btn-ghost" id="downloadWater" disabled>Save KMZ</button>
- </div>
- <div class="status-line" id="statusWater">No water exclusions</div>
- <div class="step-footer">
- <button class="btn btn-primary" id="continueStep1" disabled>Continue to Incident Data</button>
- </div>
- </div>
-
- <div class="panel" id="panel2">
- <div class="panel-header">
- <span class="step-tag">STEP 02</span>
- <span class="panel-title">Incident Data</span>
- </div>
- <p class="help">Generate synthetic incidents from a distribution, or upload real incident data (CSV / Excel) with date, time, and coordinates.</p>
-
- <div class="field">
- <label class="field-label">Time Window</label>
- <select id="kpiTimeWindow">
- <option value="24" selected>1 day</option>
- <option value="168">1 week</option>
- <option value="720">1 month</option>
- <option value="8760">1 year</option>
- </select>
- <div class="field-desc">Period the incidents represent <span class="field-desc-dim">(longer = bursts spread out, fewer units needed)</span></div>
- </div>
-
- <div class="subsection-label" style="margin-top: 14px;">
- Incident KPIs
- <span class="hint">name - KPI - overhead - target - weight</span>
- </div>
- <p class="help" style="font-size: 11px; line-height: 1.45;">One row per incident class. Each category has its own response-time KPI and service-level target; the optimizer sizes each cluster to meet all targets simultaneously. Weight drives both auto-generation probability and the greedy priority of geographic siting.</p>
- <div id="categoriesList" class="categories-list"></div>
- <button class="btn btn-secondary" id="addCategoryBtn" style="margin-top: 6px;">+ Add Category</button>
-
- <div class="mode-tabs" role="tablist" style="margin-bottom: 10px; margin-top: 14px;">
- <button class="mode-tab active" data-source="generate">Generate</button>
- <button class="mode-tab" data-source="upload">Upload</button>
- </div>
-
- <div id="generateSourcePanel">
- <div class="field-row">
- <div class="field">
- <label class="field-label">Count</label>
- <input type="number" id="incidentCount" value="120" min="5" max="2000">
- </div>
- <div class="field">
- <label class="field-label">Distribution</label>
- <select id="patternMode">
- <option value="clustered">Hotspot Clusters</option>
- <option value="uniform">Uniform Random</option>
- <option value="corridor">Corridor</option>
- </select>
- </div>
- </div>
- <p class="help" style="margin-top: 8px; font-size: 11px;">Probability of each category is driven by the <strong>Weight</strong> field in the Incident KPIs section above.</p>
- <div class="field-row" style="gap: 6px;">
- <button class="btn btn-primary" id="generateBtn" disabled>Generate Incidents</button>
- <button class="btn btn-secondary" id="downloadGeneratedBtn" disabled title="Download the generated incidents as CSV - same format the upload parser reads">Download CSV</button>
- </div>
- </div>
-
- <div id="uploadSourcePanel" style="display:none;">
- <p class="help" style="font-size: 11px; line-height: 1.45;">
- Expected columns: <code>date</code>, <code>time</code> (or combined <code>datetime</code>) and <code>lat</code>/<code>latitude</code>, <code>lng</code>/<code>longitude</code>.
- Optional <code>category</code> column (also accepts <code>priority</code>, <code>severity</code>, <code>class</code>): matched by name to your defined categories. Unrecognized values default to the first category.
- </p>
- <label class="btn btn-secondary" style="text-align:center;cursor:pointer;display:block;">
- Choose CSV or Excel
- <input type="file" id="incidentFileInput" accept=".csv,.xlsx,.xls" style="display:none;">
- </label>
- </div>
-
- <div class="status-line" id="status2">No incident data</div>
-
- <div id="incidentStatsBlock" class="stats-block" style="display:none;">
- <div class="stats-header">
- <span>Incident Statistics</span>
- <button class="btn btn-ghost btn-inline" id="exportIncidentsBtn">Export CSV</button>
- </div>
- <p class="stats-blurb">What the optimizer is actually working with. Use these to sanity-check your data before computing the deployment.</p>
-
- <div class="stats-grid">
- <div class="stat-cell">
- <div class="stat-label">Total Incidents</div>
- <div class="stat-value" id="stat-total">-</div>
- <div class="stat-desc">After area + zone filtering</div>
- </div>
- <div class="stat-cell">
- <div class="stat-label">Time Span</div>
- <div class="stat-value" id="stat-span">-</div>
- <div class="stat-desc" id="stat-span-desc">Window the data covers</div>
- </div>
- <div class="stat-cell">
- <div class="stat-label">Average Rate</div>
- <div class="stat-value" id="stat-rate">-</div>
- <div class="stat-desc">Mean arrival rate over the span</div>
- </div>
- <div class="stat-cell">
- <div class="stat-label">Median Interval</div>
- <div class="stat-value" id="stat-interval">-</div>
- <div class="stat-desc">Time between consecutive incidents</div>
- </div>
- <div class="stat-cell stat-cell-wide">
- <div class="stat-label">Busiest Period</div>
- <div class="stat-value" id="stat-peak">-</div>
- <div class="stat-desc">When the highest concentration of incidents occurred</div>
- </div>
- <div class="stat-cell">
- <div class="stat-label">Peak Concurrent</div>
- <div class="stat-value" id="stat-concurrent">-</div>
- <div class="stat-desc">Max simultaneous active incidents (drives unit sizing)</div>
- </div>
- <div class="stat-cell">
- <div class="stat-label">Day / Night Split</div>
- <div class="stat-value" id="stat-daynight">-</div>
- <div class="stat-desc">06:00-18:00 vs 18:00-06:00 mix</div>
- </div>
- <div class="stat-cell">
- <div class="stat-label">Geographic Spread</div>
- <div class="stat-value" id="stat-spread">-</div>
- <div class="stat-desc">Diagonal extent of incident bounding box</div>
- </div>
- </div>
-
- <div class="hist-wrap">
- <div class="hist-label">Arrivals per <span id="histBinLabel">hour</span></div>
- <div class="hist" id="hourHistogram"></div>
- <div class="stat-desc" id="hist-desc" style="margin-top: 4px;">Bursts shown in cyan indicate concentrated arrival periods that drive concurrency.</div>
- </div>
-
- <div class="hist-label" style="margin-top: 10px;">Priority Mix</div>
- <div class="priority-breakdown" id="priorityBreakdown"></div>
- <div class="stat-desc" style="margin-top: 4px;">Each category's share. The optimizer sizes each cluster against the strictest target with demand.</div>
- </div>
- <div class="step-footer">
- <button class="btn btn-ghost" id="backStep2">Back</button>
- <button class="btn btn-primary" id="continueStep2" disabled>Continue to Compute</button>
- </div>
- </div>
-
- <div class="panel" id="panel3">
- <div class="panel-header">
- <span class="step-tag">STEP 03</span>
- <span class="panel-title">Compute Deployment</span>
- </div>
- <p class="help">Runs the time-aware optimizer using your Mission and Toolkit settings, area, and incident pattern. Stations are sized to handle observed concurrent demand - not just average load.</p>
- <button class="btn btn-primary" id="optimizeBtn" disabled>Compute Deployment</button>
- <div class="status-line" id="status3">No deployment computed</div>
- </div>
-
- <div class="panel" id="panel4">
- <div class="panel-header">
- <span class="step-tag">STEP 04</span>
- <span class="panel-title">Report & Handoff</span>
- </div>
- <p class="help">Package the mission plan for command review, GIS handoff, and repeatable analysis.</p>
- <div class="subsection-label">REPORT CONTENT</div>
- <div class="report-checklist">
- <label><input type="checkbox" checked> Executive summary <span>Coverage, units, KPI targets</span></label>
- <label><input type="checkbox" checked> Coverage map <span>Stations, radii, and constraints</span></label>
- <label><input type="checkbox" checked> Deployment schedule <span>Site coordinates and unit counts</span></label>
- <label><input type="checkbox" checked> Assumptions & limits <span>Inputs used by the optimizer</span></label>
- <label><input type="checkbox"> Appendix JSON snapshot <span>Re-runnable mission data</span></label>
- </div>
- <div class="subsection-label">HANDOFF</div>
- <div class="field-grid">
- <div class="field">
- <label class="field-label">Operation ID</label>
- <input value="OP-2026-0341">
+  <footer class="home-bottom-dock">
+    <div><span class="status-dot"></span><span>ENV</span><strong>PROD</strong></div>
+    <div><span>BUILD</span><strong>9c4a · 27 MAY 26</strong></div>
+    <div><span>LAST USED</span><strong>OP-DXB-2026-0340 · 2H AGO</strong></div>
+    <p>UNMANNED AERIAL SYSTEMS CENTER · DUBAI POLICE</p>
+  </footer>
 </div>
-<div class="field">
-<label class="field-label">Classification</label>
- <select>
- <option selected>CONFIDENTIAL</option>
- <option>RESTRICTED</option>
- <option>OFFICIAL USE ONLY</option>
- </select>
-</div>
- </div>
- <div class="status-line good">Ready to generate PDF, JSON, CSV, and KMZ handoff files</div>
- <div class="station-handoff" id="stationHandoffPanel">
- <div class="top-sites-header"><span>Sites - sorted by demand</span><button class="text-link" type="button" id="exportScheduleBtn">Export CSV</button></div>
- <div class="station-table" id="stationReportList">
- <div class="station-empty">Compute deployment to populate station recommendations.</div>
- </div>
- <div class="station-detail" id="stationDetailPanel">
- <div class="station-empty">Select a DFR station from the list to zoom the map and inspect platform, units, response time, and demand mix.</div>
- </div>
- </div>
- <div class="step-footer">
- <button class="btn btn-ghost" id="backStep4">Back</button>
- </div>
- </div>
-
- <div class="metrics-panel">
- <div class="panel-header" style="margin-bottom: 12px;">
- <span class="step-tag">METRICS</span>
- <span class="panel-title">Mission Snapshot</span>
- </div>
- <div class="metrics-grid">
- <div class="metric">
- <div class="metric-label">Area</div>
- <div class="metric-value" id="m-area">-<span class="metric-unit"></span></div>
- </div>
- <div class="metric">
- <div class="metric-label">Incidents</div>
- <div class="metric-value" id="m-incidents">-</div>
- </div>
- <div class="metric">
- <div class="metric-label">Sites</div>
- <div class="metric-value" id="m-stations">-</div>
- </div>
- <div class="metric highlight">
- <div class="metric-label">DroneBox Units</div>
- <div class="metric-value" id="m-units">-</div>
- </div>
- <div class="metric coverage-metric">
- <div class="metric-label">Geographic Cov.</div>
- <div class="metric-value" id="m-coverage">-</div>
- </div>
- <div class="metric coverage-metric">
- <div class="metric-label">KPI Compliance</div>
- <div class="metric-value" id="m-kpi">-</div>
- </div>
- </div>
-
- <div class="marginal-chart" id="marginalChart" style="display:none;">
- <div class="chart-header">Saturation Curves</div>
- <canvas id="canvasCov" width="320" height="58"></canvas>
- <canvas id="canvasKpi" width="320" height="58"></canvas>
- </div>
-
- </div>
-
- <div class="actions-bar">
- <button class="btn btn-ghost step3-action" id="backStep3">Back</button>
- <button class="btn btn-secondary step3-action" id="resetBtn">Reset</button>
- <button class="btn btn-primary step3-action" id="continueStep3" disabled>Continue to Report</button>
- <button class="btn btn-primary" id="reportBtn">Generate PDF</button>
- <button class="btn btn-ghost" id="exportBtn">JSON</button>
- </div>
-
- </aside>
- </main>
-
- <footer id="bottomDock">
- <div class="dock-cell dock-state"><span class="status-dot live"></span><span>STATE</span><strong id="footerStatus">IDLE</strong></div>
- <div class="dock-cell"><span>AREA</span><strong id="dockArea">-</strong></div>
- <div class="dock-cell"><span>INCIDENTS</span><strong id="dockIncidents">-</strong></div>
- <div class="dock-cell"><span>SITES</span><strong id="dockSites">-</strong></div>
- <div class="dock-cell"><span>UNITS</span><strong id="dockUnits">-</strong></div>
- <div class="dock-note">STEP <span id="dockStep">01</span> OF 04 - HAVERSINE SOLVER</div>
- </footer>
-</div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="app.js"></script>
-
-<!-- ============ INCIDENT UPLOAD PREVIEW MODAL ============ -->
-<div id="uploadPreviewModal" class="upload-modal" style="display:none;">
- <div class="upload-modal-backdrop"></div>
- <div class="upload-modal-card">
- <div class="upload-modal-header">
- <span>Confirm Upload</span>
- <button class="upload-modal-close" id="uploadPreviewCancel" aria-label="Close">x</button>
- </div>
- <div class="upload-modal-body">
- <p class="upload-modal-blurb" id="uploadPreviewBlurb"></p>
- <div class="upload-modal-warnings" id="uploadPreviewWarnings"></div>
-
- <div class="upload-modal-section-label">Column Mapping</div>
- <div class="upload-modal-mapping" id="uploadPreviewMapping"></div>
-
- <div class="upload-modal-section-label" style="margin-top: 14px;">First 5 rows (after parsing)</div>
- <div class="upload-modal-table-wrap">
- <table class="upload-modal-table" id="uploadPreviewTable"></table>
- </div>
-
- <div class="upload-modal-stats" id="uploadPreviewStats"></div>
- </div>
- <div class="upload-modal-footer">
- <button class="btn btn-ghost" id="uploadPreviewCancelBtn">Cancel</button>
- <button class="btn btn-primary" id="uploadPreviewAccept">Looks Right - Import</button>
- </div>
- </div>
-</div>
-
-<!-- ============ ABOUT / EXPLAINER MODAL ============ -->
-<div id="aboutModal" class="about-modal" style="display:none;">
- <div class="about-backdrop"></div>
- <div class="about-card">
- <div class="about-header">
- <div class="about-header-left">
- <span class="step-dot" id="aboutStepLabel">ABOUT</span>
- <span id="aboutTitleText">DFR Deployment Planner</span>
- </div>
- <button class="about-close" id="aboutClose" aria-label="Close">x</button>
- </div>
-
- <div class="about-body" id="aboutBody">
-
- <!-- Page 1: What it does + how you use it -->
- <div class="about-page active" data-page="0">
- <div class="about-eyebrow">WHAT THIS TOOL IS</div>
- <h2>Plans where to put DroneBox stations.</h2>
- <p>When an emergency call comes in, the nearest DroneBox launches automatically and arrives on scene before patrol units. This tool decides how many stations you need and where to put them.</p>
- <div class="about-illus">
- <svg viewBox="0 0 520 180" xmlns="http://www.w3.org/2000/svg">
- <defs>
- <radialGradient id="cov1" cx="50%" cy="50%" r="50%">
- <stop offset="0%" stop-color="#9fb4c8" stop-opacity="0.35"/>
- <stop offset="100%" stop-color="#9fb4c8" stop-opacity="0"/>
- </radialGradient>
- </defs>
- <rect width="520" height="180" fill="#020609"/>
- <rect x="20" y="20" width="480" height="140" fill="none" stroke="#7CDCE8" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.7"/>
- <!-- coverage circles -->
- <circle cx="130" cy="80" r="55" fill="url(#cov1)"/>
- <circle cx="270" cy="100" r="55" fill="url(#cov1)"/>
- <circle cx="400" cy="70" r="55" fill="url(#cov1)"/>
- <!-- station markers -->
- <circle cx="130" cy="80" r="6" fill="#7CDCE8" stroke="#06080B" stroke-width="1.5"/>
- <circle cx="270" cy="100" r="6" fill="#7CDCE8" stroke="#06080B" stroke-width="1.5"/>
- <circle cx="400" cy="70" r="6" fill="#7CDCE8" stroke="#06080B" stroke-width="1.5"/>
- <!-- incident dots -->
- <circle cx="110" cy="60" r="3" fill="#FF6B7E"/>
- <circle cx="150" cy="100" r="3" fill="#FF6B7E"/>
- <circle cx="260" cy="80" r="3" fill="#FF6B7E"/>
- <circle cx="290" cy="120" r="3" fill="#FF6B7E"/>
- <circle cx="385" cy="55" r="3" fill="#FF6B7E"/>
- <circle cx="420" cy="90" r="3" fill="#FF6B7E"/>
- <!-- labels -->
- <text x="130" y="155" text-anchor="middle" fill="#8ea4b7" font-family="JetBrains Mono" font-size="9">SITE 1</text>
- <text x="270" y="155" text-anchor="middle" fill="#8ea4b7" font-family="JetBrains Mono" font-size="9">SITE 2</text>
- <text x="400" y="155" text-anchor="middle" fill="#8ea4b7" font-family="JetBrains Mono" font-size="9">SITE 3</text>
- <text x="260" y="14" text-anchor="middle" fill="#EAF1F8" font-family="JetBrains Mono" font-size="9" letter-spacing="1">OPERATIONAL AREA</text>
- </svg>
- </div>
- <div class="about-numbered">
- <div class="about-step-row">
- <div class="about-step-num">1</div>
- <div class="about-step-body"><strong>Draw the operational area</strong></div>
- </div>
- <div class="about-step-row">
- <div class="about-step-num">2</div>
- <div class="about-step-body"><strong>Set incident KPIs and upload or generate data</strong></div>
- </div>
- <div class="about-step-row">
- <div class="about-step-num">3</div>
- <div class="about-step-body"><strong>Compute and export the deployment plan</strong></div>
- </div>
- </div>
- </div>
-
- <!-- Page 2: How the math works + what it assumes -->
- <div class="about-page" data-page="1">
- <div class="about-eyebrow">THE MATH, SIMPLY</div>
- <h2>Two questions: where, and how many.</h2>
- <div class="about-cards">
- <div class="about-card-small">
- <div class="ac-label">WHERE</div>
- <div class="ac-text">Greedy maximum-coverage: place each station where it covers the most incidents not already covered, respecting no-fly zones.</div>
- </div>
- <div class="about-card-small">
- <div class="ac-label">HOW MANY</div>
- <div class="ac-text">Time-aware simulation: when calls overlap, the simulation grows the drone count at each site until every category hits its target.</div>
- </div>
- </div>
- <div class="about-illus">
- <svg viewBox="0 0 520 130" xmlns="http://www.w3.org/2000/svg">
- <rect width="520" height="130" fill="#020609"/>
- <!-- timeline -->
- <line x1="30" y1="65" x2="490" y2="65" stroke="#54697a" stroke-width="1"/>
- <text x="30" y="22" fill="#9fb4c8" font-family="JetBrains Mono" font-size="9">DRONE 1</text>
- <text x="30" y="115" fill="#EAF1F8" font-family="JetBrains Mono" font-size="9">DRONE 2</text>
- <!-- drone 1 busy bars -->
- <rect x="60" y="32" width="80" height="14" fill="#9fb4c8" opacity="0.5"/>
- <rect x="180" y="32" width="60" height="14" fill="#9fb4c8" opacity="0.5"/>
- <rect x="300" y="32" width="90" height="14" fill="#9fb4c8" opacity="0.5"/>
- <!-- drone 2 busy bars -->
- <rect x="100" y="82" width="60" height="14" fill="#7CDCE8" opacity="0.5"/>
- <rect x="260" y="82" width="80" height="14" fill="#7CDCE8" opacity="0.5"/>
- <!-- incident dispatched markers -->
- <circle cx="60" cy="65" r="4" fill="#FF6B7E"/>
- <circle cx="100" cy="65" r="4" fill="#FF6B7E"/>
- <circle cx="180" cy="65" r="4" fill="#FF6B7E"/>
- <circle cx="260" cy="65" r="4" fill="#FF6B7E"/>
- <circle cx="300" cy="65" r="4" fill="#FF6B7E"/>
- <text x="260" y="65" fill="#020609" font-family="JetBrains Mono" font-size="8" font-weight="700" dy="2.5" text-anchor="middle">!</text>
- </svg>
- </div>
- <div>
- <div class="about-eyebrow" style="margin-bottom: 6px;">HONEST LIMITS</div>
- <p class="muted" style="margin-top: 0;">Straight-line paths - constant mission duration - no weather downtime. Use real flight logs to calibrate before procurement.</p>
- </div>
- </div>
-
- <!-- Page 3: About us / mission -->
- <div class="about-page" data-page="2">
- <div class="about-mission">
- <img id="aboutPageLogo" alt="UASC" class="about-logo">
- <div class="about-eyebrow" style="margin-bottom: 8px;">ABOUT US</div>
- <h2>Because this work shouldn't start from scratch.</h2>
- <p style="text-align: left; margin-top: 18px;">Dubai Police's Unmanned Aerial Systems Center developed this application from years of operational experience in building and deploying one of the region's leading Drone as First Responder capabilities.</p>
- <p style="text-align: left;">Since 2020, our drone operations have supported more than 10,000 incidents, giving us practical insight into one of the most important questions facing any agency planning a DFR program: where should drones be placed, how many are needed, and what operational performance can realistically be achieved?</p>
- <p style="text-align: left;">This tool was created to transform that experience into a practical planning capability. It allows public safety agencies, civil defense organizations, search and rescue teams, emergency medical services, ports, and critical infrastructure operators to assess deployment needs using real incident data, defined coverage areas, and measurable response objectives.</p>
- <p style="text-align: left;">Our purpose is not only to simplify planning, but to make drone deployment more evidence-based, scalable, and operationally defensible. By helping agencies move from assumptions to data-driven deployment models, we aim to support faster response, better resource allocation, and stronger public safety outcomes.</p>
- <hr class="about-closing-divider">
- <p class="about-closing">The future of DFR should not depend on guesswork. It should be planned, measured, and built around the communities it is meant to serve.</p>
- <div class="signature">
- Built by the Autonomous Systems Center<br>
- Autonomous Systems Center - Dubai Police
- </div>
- </div>
- </div>
-
- </div>
-
- <div class="about-footer">
- <div class="about-progress" id="aboutProgress">
- <span class="about-dot active" data-page="0"></span>
- <span class="about-dot" data-page="1"></span>
- <span class="about-dot" data-page="2"></span>
- </div>
- <span class="about-page-counter" id="aboutPageCounter">1 / 3</span>
- <div class="about-nav">
- <button id="aboutPrev" disabled><- Back</button>
- <button class="primary" id="aboutNext">Next -></button>
- </div>
- </div>
- </div>
-</div>
-
+<script src="home.js"></script>
 </body>
 </html>

@@ -3225,7 +3225,7 @@
     try {
       btn.disabled = true;
       setFooter('Loading Natural Earth water polygons...');
-      const res = await fetch('data/natural-earth-water.geojson');
+      const res = await fetch(new URL('../data/natural-earth-water.geojson', document.baseURI).href);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const geo = await res.json();
       clearAllWaterZones();
