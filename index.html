@@ -29,7 +29,6 @@
       <span><b>OPR //</b> CMD/UASC</span>
       <span><b>CLS //</b> CONFIDENTIAL</span>
     </div>
-    <a class="home-about" href="planner/#about">ABOUT</a>
     <div class="system-ready"><span></span>SYSTEM READY</div>
   </header>
 
@@ -42,36 +41,35 @@
           <span class="mono dim">UASC PLANNING SUITE — INTERNAL</span>
         </div>
         <h1>
-          Where to put the boxes,<br>
-          <span>how many you need,</span><br>
-          and what they can do.
+          Plan DFR coverage,<br>
+          <span>prove the response,</span><br>
+          deploy with confidence.
         </h1>
         <p>
-          A planning model for Drone-as-First-Responder programs. Define an
-          area, point at your incident history, and the optimizer returns a
-          defensible site list — sized for concurrent demand, not averages.
+          Turn incident history into a defensible DroneBox deployment plan:
+          sites, units, coverage, and KPI performance in one mission workflow.
         </p>
         <div class="home-actions">
           <a class="btn btn-primary" href="planner/">START NEW MISSION →</a>
           <button class="btn btn-ghost" type="button">LOAD SAVED PLAN</button>
-          <button class="btn btn-ghost" type="button">WHY THIS TOOL EXISTS</button>
+          <button class="btn btn-ghost" type="button" id="whyToolBtn">WHY THIS TOOL EXISTS</button>
         </div>
         <div class="stats-strip" aria-label="Planner stats">
           <div>
             <strong>10,000+</strong>
-            <span class="mono">incidents supported since 2020</span>
+            <span class="mono">incidents responded to since 2020</span>
           </div>
           <div>
-            <strong>30+</strong>
-            <span class="mono">agencies briefed</span>
+            <strong class="cyan">&lt;60s</strong>
+            <span class="mono">response time in all incidents in Dubai</span>
           </div>
           <div>
-            <strong class="cyan">&lt; 3 s</strong>
-            <span class="mono">optimizer solve time</span>
+            <strong>20+</strong>
+            <span class="mono">drone system deployments across Dubai</span>
           </div>
           <div>
-            <strong class="ok">95%</strong>
-            <span class="mono">KPI target compliance</span>
+            <strong class="ok">100%</strong>
+            <span class="mono">response KPI compliance</span>
           </div>
         </div>
       </div>
@@ -84,27 +82,22 @@
         <span class="mono dim">DRAG IMAGE OR VIDEO</span>
       </div>
 
-      <div class="hero-slot-frame main-slot">
-        <div class="drop-slot" data-slot-id="home-hero" data-placeholder="Drop hero video / image — drone footage works well"></div>
+      <div class="media-split">
+      <div class="hero-slot-frame media-tall">
+        <div class="drop-slot" data-slot-id="home-station" data-placeholder="Drop station image"></div>
         <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
-        <div class="hud hud-top mono cyan">● REC · OP-DXB-2026-0341</div>
+        <div class="slot-label mono cyan">STN · DRONEBOX</div>
+      </div>
+
+      <div class="hero-slot-frame media-tall">
+        <div class="drop-slot" data-slot-id="home-drone" data-placeholder="Drop drone image"></div>
+        <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+        <div class="hud hud-top mono cyan">● REC · DFR AIRFRAME</div>
         <div class="hud hud-bottom mono">
           <span>25.21834°N · 55.42012°E</span>
           <span>ALT 120m · 14:32:07Z</span>
         </div>
       </div>
-
-      <div class="thumb-grid">
-        <div class="hero-slot-frame">
-          <div class="drop-slot" data-slot-id="home-thumb-1" data-placeholder="Station photo"></div>
-          <span class="corner muted tl"></span><span class="corner muted tr"></span><span class="corner muted bl"></span><span class="corner muted br"></span>
-          <div class="slot-label mono cyan">STN · 01</div>
-        </div>
-        <div class="hero-slot-frame">
-          <div class="drop-slot" data-slot-id="home-thumb-2" data-placeholder="Coverage map screenshot"></div>
-          <span class="corner muted tl"></span><span class="corner muted tr"></span><span class="corner muted bl"></span><span class="corner muted br"></span>
-          <div class="slot-label mono cyan">MAP · OUT</div>
-        </div>
       </div>
 
       <div class="media-foot">
@@ -120,6 +113,23 @@
     <div><span>LAST USED</span><strong>OP-DXB-2026-0340 · 2H AGO</strong></div>
     <p>UNMANNED AERIAL SYSTEMS CENTER · DUBAI POLICE</p>
   </footer>
+</div>
+
+<div class="home-about-modal" id="homeAboutModal" hidden>
+  <div class="home-about-backdrop" data-about-close></div>
+  <section class="home-about-card" role="dialog" aria-modal="true" aria-labelledby="homeAboutTitle">
+    <div class="home-about-head">
+      <span class="tag-chip">WHY THIS TOOL EXISTS</span>
+      <button type="button" class="slot-clear about-x" data-about-close aria-label="Close">×</button>
+    </div>
+    <h2 id="homeAboutTitle">DFR should be planned from evidence, not guesswork.</h2>
+    <p>
+      DroneBox coverage depends on real geography, real demand, and real response targets.
+      This planner turns operational history into station locations, unit counts, and KPI
+      evidence that command teams can review before deploying systems across Dubai.
+    </p>
+    <a class="btn btn-primary" href="planner/">START NEW MISSION →</a>
+  </section>
 </div>
 <script src="home.js"></script>
 </body>

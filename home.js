@@ -104,7 +104,22 @@
     });
   }
 
+  function wireAboutModal() {
+    const modal = document.getElementById('homeAboutModal');
+    const openBtn = document.getElementById('whyToolBtn');
+    if (!modal || !openBtn) return;
+    const close = () => { modal.hidden = true; };
+    openBtn.addEventListener('click', () => { modal.hidden = false; });
+    modal.querySelectorAll('[data-about-close]').forEach(el => {
+      el.addEventListener('click', close);
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !modal.hidden) close();
+    });
+  }
+
   updateUtcClock();
   setInterval(updateUtcClock, 1000);
   document.querySelectorAll('.drop-slot').forEach(wireDropSlot);
+  wireAboutModal();
 })();
