@@ -22,7 +22,7 @@
  </div>
  <div class="header-status">
  <div class="mission-strip">
- <span><b>OP //</b> OP-DXB-2026-0341</span>
+ <span><b>OP //</b> OP-2026-0341</span>
  <span><b>TS //</b> <span id="utcClock">UTC --:--:--</span></span>
  <span><b>OPR //</b> CMD/UASC</span>
  <span><b>CLS //</b> CONFIDENTIAL</span>
@@ -409,12 +409,16 @@
  <div class="field-grid">
  <div class="field">
  <label class="field-label">Operation ID</label>
- <input value="OP-DXB-2026-0341">
- </div>
- <div class="field">
- <label class="field-label">Classification</label>
- <input value="CONFIDENTIAL">
- </div>
+ <input value="OP-2026-0341">
+</div>
+<div class="field">
+<label class="field-label">Classification</label>
+ <select>
+ <option selected>CONFIDENTIAL</option>
+ <option>RESTRICTED</option>
+ <option>OFFICIAL USE ONLY</option>
+ </select>
+</div>
  </div>
  <div class="status-line good">Ready to generate PDF, JSON, CSV, and KMZ handoff files</div>
  <div class="station-handoff" id="stationHandoffPanel">
@@ -676,4 +680,3 @@
 
 </body>
 </html>
-

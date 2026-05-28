@@ -66,6 +66,12 @@
     return 2 * R * Math.asin(Math.sqrt(x));
   }
 
+  function percentile(sortedValues, pct) {
+    if (!sortedValues || sortedValues.length === 0) return 0;
+    const idx = Math.min(sortedValues.length - 1, Math.max(0, Math.ceil((pct / 100) * sortedValues.length) - 1));
+    return sortedValues[idx];
+  }
+
   function pointInPolygon(point, polygon) {
     const rings = polygon.getLatLngs();
     const ring = Array.isArray(rings[0]) ? rings[0] : rings;
@@ -659,8 +665,22 @@
     for (const s of sites) {
       const stationServiceMin = (s.serviceTimeMin != null) ? s.serviceTimeMin : kpi.serviceTimeMin;
       const serviceTimeHours = stationServiceMin / 60;
+      const speedMs = s.speedKmh ? (s.speedKmh * 1000 / 3600) : (inputSpeedToMs(document.getElementById('droneSpeed').value) || 15);
       s.serviceTimeMin = stationServiceMin;
       const cluster = (s.incidentIdx || []).map(idx => allIncidents[idx]).filter(Boolean);
+      s.responseTimesSec = cluster.map(inc => {
+        const cat = getCategoryById(inc.priority);
+        const overhead = (cat && cat.overheadSec != null) ? cat.overheadSec : 15;
+        return overhead + (haversine(s, inc) / Math.max(1, speedMs));
+      }).sort((a, b) => a - b);
+      if (s.responseTimesSec.length > 0) {
+        const totalResponse = s.responseTimesSec.reduce((sum, value) => sum + value, 0);
+        s.avgResponseSec = totalResponse / s.responseTimesSec.length;
+        s.p95ResponseSec = percentile(s.responseTimesSec, 95);
+      } else {
+        s.avgResponseSec = 0;
+        s.p95ResponseSec = 0;
+      }
       s.unitsRequired = requiredUnitsFromTrace(cluster, stationServiceMin, targets, kpi.periodHours);
       if (remainingByType && s.typeId) {
         const additionalNeeded = Math.max(0, s.unitsRequired - 1);
@@ -1764,7 +1784,17 @@
       renderStationDetail(null);
       return;
     }
-    reportList.innerHTML = stations.map((s, idx) => {
+    const totalUnits = stations.reduce((sum, s) => sum + (s.units || 1), 0);
+    const totalCovered = stations.reduce((sum, s) => sum + (s.covered || (s.incidentIdx ? s.incidentIdx.length : 0)), 0);
+    const allKpi = (100 * overallKpiCompliance(stations, incidents.length)).toFixed(1);
+    const allRow = `<button class="station-row ${selectedStationIndex === 'all' ? 'selected' : ''}" type="button" data-station-index="all">
+        <span>ALL</span>
+        <span><b>All DFR Stations</b><small>Network-wide station stats</small></span>
+        <em>${totalCovered}</em>
+        <em class="units">x${totalUnits}</em>
+        <em class="kpi">${allKpi}%</em>
+      </button>`;
+    reportList.innerHTML = allRow + stations.map((s, idx) => {
       const coord = formatCoordinate(s.lat, s.lng);
       const units = s.units || 1;
       const siteKpi = ((s.achievedServiceLevel || 0) * 100).toFixed(1);
@@ -1778,14 +1808,104 @@
       </button>`;
     }).join('');
     reportList.querySelectorAll('[data-station-index]').forEach(btn => {
-      btn.onclick = () => selectStation(parseInt(btn.dataset.stationIndex, 10), true);
+      btn.onclick = () => btn.dataset.stationIndex === 'all'
+        ? selectAllStations(true)
+        : selectStation(parseInt(btn.dataset.stationIndex, 10), true);
     });
     if (selectedStationIndex == null) renderStationDetail(null);
+  }
+
+  function renderResponseBars(values) {
+    if (!values || values.length === 0) return '<span class="station-empty">No response-time samples</span>';
+    const sorted = values.slice().sort((a, b) => a - b);
+    const min = Math.floor(sorted[0] / 5) * 5;
+    const max = Math.max(min + 1, Math.ceil(sorted[sorted.length - 1] / 5) * 5);
+    const binCount = 24;
+    const binSize = Math.max(1, (max - min) / binCount);
+    const bins = new Array(binCount).fill(0);
+    for (const value of sorted) {
+      const idx = Math.min(binCount - 1, Math.max(0, Math.floor((value - min) / binSize)));
+      bins[idx]++;
+    }
+    const peak = Math.max(1, ...bins);
+    return bins.map((count, i) => {
+      const start = Math.round(min + i * binSize);
+      const end = Math.round(min + (i + 1) * binSize);
+      const h = Math.max(4, Math.round(54 * count / peak));
+      const cls = end > getStrictestKpiSec() ? 'hot' : end > getStrictestKpiSec() * 0.8 ? 'warn' : '';
+      return `<i class="${cls}" title="${start}-${end}s: ${count}" style="height:${h}px"></i>`;
+    }).join('');
+  }
+
+  function buildAllStationSummary() {
+    const responseTimes = stations.flatMap(s => s.responseTimesSec || []);
+    const sortedTimes = responseTimes.slice().sort((a, b) => a - b);
+    const clusterTotals = {};
+    for (const cat of incidentCategories) clusterTotals[cat.id] = 0;
+    for (const s of stations) {
+      for (const cat of incidentCategories) {
+        clusterTotals[cat.id] += (s.clusterTotals && s.clusterTotals[cat.id]) || 0;
+      }
+    }
+    const totalUnits = stations.reduce((sum, s) => sum + (s.units || 1), 0);
+    const totalCovered = stations.reduce((sum, s) => sum + (s.covered || (s.incidentIdx ? s.incidentIdx.length : 0)), 0);
+    return {
+      covered: totalCovered,
+      units: totalUnits,
+      responseTimesSec: sortedTimes,
+      avgResponseSec: sortedTimes.length ? sortedTimes.reduce((sum, value) => sum + value, 0) / sortedTimes.length : 0,
+      p95ResponseSec: percentile(sortedTimes, 95),
+      achievedServiceLevel: overallKpiCompliance(stations, incidents.length),
+      clusterTotals
+    };
+  }
+
+  function renderAllStationDetail() {
+    const detail = document.getElementById('stationDetailPanel');
+    if (!detail) return;
+    const summary = buildAllStationSummary();
+    const avg = summary.avgResponseSec ? Math.round(summary.avgResponseSec) : 0;
+    const p95 = summary.p95ResponseSec ? Math.round(summary.p95ResponseSec) : 0;
+    const kpi = ((summary.achievedServiceLevel || 0) * 100).toFixed(1);
+    const total = summary.covered || 0;
+    const catRows = incidentCategories.map(cat => {
+      const count = summary.clusterTotals[cat.id] || 0;
+      if (!count) return '';
+      const pct = total ? Math.round(100 * count / total) : 0;
+      return `<div class="demand-bar"><span>${escapeHtml(cat.name)}</span><i style="--pct:${pct}%"></i><b>${count}</b></div>`;
+    }).join('');
+    const firstCat = incidentCategories[0];
+    const secondCat = incidentCategories[1];
+    detail.innerHTML = `
+      <div class="station-detail-kicker">DFR Network - All Stations</div>
+      <h4>All DFR Stations</h4>
+      <div class="coords">${stations.length} sites in the computed deployment</div>
+      <div class="detail-tile-grid">
+        <div class="detail-tile"><span>Stations</span><strong>${stations.length}</strong></div>
+        <div class="detail-tile"><span>Incidents</span><strong>${total}</strong></div>
+        <div class="detail-tile"><span>Units</span><strong style="color:var(--cyan)">x${summary.units}</strong></div>
+        <div class="detail-tile"><span>Average</span><strong style="color:var(--cyan)">${avg}s</strong></div>
+        <div class="detail-tile"><span>P95</span><strong>${p95}s</strong></div>
+        <div class="detail-tile"><span>KPI</span><strong style="color:var(--ok)">${kpi}%</strong></div>
+      </div>
+      <div class="station-detail-kicker">Response Time Distribution (s)</div>
+      <div class="response-bars">${renderResponseBars(summary.responseTimesSec)}</div>
+      <div class="demand-mix">
+        <div>
+          <div class="demand-card"><span>${firstCat ? escapeHtml(firstCat.name) : 'Critical'}</span><strong>${firstCat ? (summary.clusterTotals[firstCat.id] || 0) : 0}</strong></div>
+          <div class="demand-card amber" style="margin-top:8px;"><span>${secondCat ? escapeHtml(secondCat.name) : 'Cat-B'}</span><strong>${secondCat ? (summary.clusterTotals[secondCat.id] || 0) : 0}</strong></div>
+        </div>
+        <div class="demand-breakdown">${catRows || '<span>No category demand in this deployment</span>'}</div>
+      </div>`;
   }
 
   function renderStationDetail(idx) {
     const detail = document.getElementById('stationDetailPanel');
     if (!detail) return;
+    if (idx === 'all') {
+      renderAllStationDetail();
+      return;
+    }
     if (idx == null || !stations[idx]) {
       detail.innerHTML = '<div class="station-empty">Select a DFR station from the list to zoom the map and inspect platform, units, response time, and demand mix.</div>';
       return;
@@ -1794,8 +1914,8 @@
     const units = s.units || 1;
     const radius = formatDistance(s.radius || updateRadius());
     const siteKpi = ((s.achievedServiceLevel || 0) * 100).toFixed(1);
-    const avg = Math.max(20, Math.round((s.avgResponseSec || 48)));
-    const p95 = Math.max(avg + 4, Math.round((s.p95ResponseSec || Math.min(95, avg + 10))));
+    const avg = s.avgResponseSec ? Math.round(s.avgResponseSec) : 0;
+    const p95 = s.p95ResponseSec ? Math.round(s.p95ResponseSec) : 0;
     const total = s.covered || (s.incidentIdx ? s.incidentIdx.length : 0);
     const catRows = incidentCategories.map((cat, cIdx) => {
       const count = (s.clusterTotals && s.clusterTotals[cat.id]) || 0;
@@ -1807,11 +1927,7 @@
     const secondCat = incidentCategories[1];
     const firstCount = firstCat && s.clusterTotals ? (s.clusterTotals[firstCat.id] || 0) : 0;
     const secondCount = secondCat && s.clusterTotals ? (s.clusterTotals[secondCat.id] || 0) : 0;
-    const bars = Array.from({ length: 24 }, (_, i) => {
-      const h = 18 + Math.round(35 * Math.exp(-Math.pow((i - 9) / 6, 2))) + (i % 5) * 2;
-      const cls = i > 20 ? 'hot' : i > 16 ? 'warn' : '';
-      return `<i class="${cls}" style="height:${Math.min(54, h)}px"></i>`;
-    }).join('');
+    const bars = renderResponseBars(s.responseTimesSec || []);
     detail.innerHTML = `
       <div class="station-detail-kicker">DFR-${String(idx + 1).padStart(2, '0')} - Platform</div>
       <h4>DFR Station ${String(idx + 1).padStart(2, '0')}</h4>
@@ -1895,6 +2011,39 @@
     renderStationReportList();
     renderStationDetail(idx);
     setFooter(`Selected DFR-${String(idx + 1).padStart(2, '0')}`);
+  }
+
+  function selectAllStations(zoom) {
+    if (stations.length === 0) return;
+    selectedStationIndex = 'all';
+    selectedStationLayer.clearLayers();
+    const bounds = L.latLngBounds([]);
+    stations.forEach((s, idx) => {
+      const color = '#7CDCE8';
+      bounds.extend([s.lat, s.lng]);
+      L.circle([s.lat, s.lng], {
+        radius: s.radius || updateRadius(),
+        color,
+        weight: 1,
+        dashArray: '2,3',
+        fillColor: color,
+        fillOpacity: 0.08
+      }).addTo(selectedStationLayer);
+      L.circleMarker([s.lat, s.lng], {
+        radius: 7,
+        color,
+        weight: 2,
+        fillColor: '#06080B',
+        fillOpacity: 1
+      }).bindTooltip(`DFR Station ${String(idx + 1).padStart(2, '0')}`, {
+        direction: 'top',
+        opacity: 0.9
+      }).addTo(selectedStationLayer);
+    });
+    if (zoom && bounds.isValid()) map.fitBounds(bounds.pad(0.2), { maxZoom: 13 });
+    renderStationReportList();
+    renderStationDetail('all');
+    setFooter('Selected all DFR stations');
   }
 
   function clearStationReport() {
@@ -2476,7 +2625,7 @@
 
   // ============ DRONE PLATFORM CATALOG ============
   // serviceTimeMin = total cycle time per call (typical mission ~10 min + downtime).
-  // For autonomous swap platforms (Optimus, Percepto, SAMS, Airobotics): ~10 min mission + swap.
+  // For autonomous swap platforms (Optimus, Percepto): ~10 min mission + swap.
   // For recharge platforms: ~10 min mission + recharge time.
   // ============ DRONE PLATFORM CATALOG ============
   // Values below are CALIBRATED to realistic DFR operations, not raw datasheet numbers.
@@ -2542,33 +2691,6 @@
       speedKmh: 50,
       serviceTimeMin: 8,
       notes: 'Spec: 40 min flight / 16.5 km round-trip (~8.25 km radius) / 65 km/h. Operator-reported: ~6-7 km effective radius. Battery swap ~3 min plus pre-flight.'
-    },
-    {
-      id: 'azur-skeyetech',
-      name: 'Skeyetech E2',
-      vendor: 'Azur Drones',
-      radius: 2000,
-      speedKmh: 40,
-      serviceTimeMin: 30,
-      notes: 'Designed for sub-2 km perimeter security, not city-scale DFR. Spec: 25-27 min flight / 50 km/h. Recharge ~30 min OR hot-swap battery <20s for crisis mode.'
-    },
-    {
-      id: 'easy-aerial-sams',
-      name: 'SAMS (Falcon free-flight)',
-      vendor: 'Easy Aerial',
-      radius: 4000,
-      speedKmh: 50,
-      serviceTimeMin: 8,
-      notes: 'Free-flight variant of SAMS. Spec: 50 min Falcon endurance. Operator-reported: 3-4 km practical DFR radius. Battery swap ~3 min. Tethered variant offers unlimited endurance but is stationary, not modeled here.'
-    },
-    {
-      id: 'airobotics-optimus',
-      name: 'Airobotics Iron Drone Raider',
-      vendor: 'Ondas Autonomous Systems',
-      radius: 5000,
-      speedKmh: 55,
-      serviceTimeMin: 6,
-      notes: 'Same parent company as Optimus (above), now under Ondas. Different airframe used historically. Mostly UAE-deployed. Spec: similar range/endurance to Optimus.'
     }
   ];
 
@@ -2915,6 +3037,7 @@
         typeName: bestType.name,
         color: bestType.color,
         typeId: bestType.id,
+        speedKmh: bestType.speedKmh,
         serviceTimeMin: bestType.serviceTimeMin
       });
       bestType.remaining--;
