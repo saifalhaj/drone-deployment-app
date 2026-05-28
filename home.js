@@ -23,7 +23,8 @@
   function renderMedia(slot, payload) {
     slot.classList.add('has-media');
     slot.innerHTML = '';
-    const media = document.createElement(payload.type.startsWith('video/') ? 'video' : 'img');
+    const mediaType = payload.type || '';
+    const media = document.createElement(mediaType.startsWith('video/') ? 'video' : 'img');
     if (media.tagName === 'VIDEO') {
       media.autoplay = true;
       media.loop = true;
@@ -62,8 +63,16 @@
     ensureClearButton(slot);
     try {
       const saved = localStorage.getItem(STORAGE_PREFIX + slot.dataset.slotId);
-      if (!saved) return;
-      renderMedia(slot, JSON.parse(saved));
+      if (saved) {
+        renderMedia(slot, JSON.parse(saved));
+        return;
+      }
+      if (slot.dataset.defaultSrc) {
+        renderMedia(slot, {
+          type: slot.dataset.defaultType || '',
+          dataUrl: slot.dataset.defaultSrc
+        });
+      }
     } catch (err) {
       localStorage.removeItem(STORAGE_PREFIX + slot.dataset.slotId);
     }
@@ -105,16 +114,49 @@
   }
 
   function wireAboutModal() {
-    const modal = document.getElementById('homeAboutModal');
+    const modal = document.getElementById('aboutModal');
     const openBtn = document.getElementById('whyToolBtn');
     if (!modal || !openBtn) return;
-    const close = () => { modal.hidden = true; };
-    openBtn.addEventListener('click', () => { modal.hidden = false; });
-    modal.querySelectorAll('[data-about-close]').forEach(el => {
-      el.addEventListener('click', close);
+    const total = 3;
+    let currentPage = 0;
+    const showPage = page => {
+      currentPage = Math.max(0, Math.min(total - 1, page));
+      modal.querySelectorAll('.about-page').forEach(el => {
+        el.classList.toggle('active', Number(el.dataset.page) === currentPage);
+      });
+      modal.querySelectorAll('.about-dot').forEach(el => {
+        el.classList.toggle('active', Number(el.dataset.page) === currentPage);
+      });
+      const prev = document.getElementById('aboutPrev');
+      const next = document.getElementById('aboutNext');
+      const counter = document.getElementById('aboutPageCounter');
+      if (prev) prev.disabled = currentPage === 0;
+      if (next) next.textContent = currentPage === total - 1 ? 'Close' : 'Next ->';
+      if (counter) counter.textContent = `${currentPage + 1} / ${total}`;
+      const body = document.getElementById('aboutBody');
+      if (body) body.scrollTop = 0;
+    };
+    const open = () => {
+      modal.style.display = 'flex';
+      showPage(0);
+    };
+    const close = () => { modal.style.display = 'none'; };
+    openBtn.addEventListener('click', open);
+    document.getElementById('aboutClose')?.addEventListener('click', close);
+    modal.querySelector('.about-backdrop')?.addEventListener('click', close);
+    document.getElementById('aboutPrev')?.addEventListener('click', () => showPage(currentPage - 1));
+    document.getElementById('aboutNext')?.addEventListener('click', () => {
+      if (currentPage === total - 1) close();
+      else showPage(currentPage + 1);
+    });
+    modal.querySelectorAll('.about-dot').forEach(el => {
+      el.addEventListener('click', () => showPage(Number(el.dataset.page)));
     });
     document.addEventListener('keydown', event => {
-      if (event.key === 'Escape' && !modal.hidden) close();
+      if (modal.style.display === 'none') return;
+      if (event.key === 'Escape') close();
+      if (event.key === 'ArrowRight') showPage(currentPage + 1);
+      if (event.key === 'ArrowLeft') showPage(currentPage - 1);
     });
   }
 
