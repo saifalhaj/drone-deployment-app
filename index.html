@@ -51,9 +51,10 @@
         </p>
         <div class="home-actions">
           <a class="btn btn-primary" href="planner/">START NEW MISSION →</a>
-          <button class="btn btn-ghost" type="button">LOAD SAVED PLAN</button>
+          <button class="btn btn-ghost" type="button" id="loadSavedPlanBtn">LOAD SAVED PLAN</button>
           <button class="btn btn-ghost" type="button" id="whyToolBtn">WHY THIS TOOL EXISTS</button>
         </div>
+        <input type="file" id="loadSavedPlanInput" accept=".json,.dfrplan,.dfrplan.json,application/json" hidden>
         <div class="stats-strip" aria-label="Planner stats">
           <div>
             <strong>10,000+</strong>

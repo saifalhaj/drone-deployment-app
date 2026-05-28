@@ -160,8 +160,46 @@
     });
   }
 
+  function wireSavedPlanLoader() {
+    const button = document.getElementById('loadSavedPlanBtn');
+    const input = document.getElementById('loadSavedPlanInput');
+    if (!button || !input) return;
+    const getStorage = () => {
+      try {
+        return window.sessionStorage || null;
+      } catch (err) {
+        return null;
+      }
+    };
+    button.addEventListener('click', () => input.click());
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const text = String(reader.result || '');
+          const parsed = JSON.parse(text);
+          if (!parsed || (parsed.fileType !== 'uasc-dfr-plan' && !parsed.area && !parsed.incidents)) {
+            throw new Error('Not a DFR plan file');
+          }
+          const storage = getStorage();
+          if (!storage) throw new Error('Plan handoff storage unavailable');
+          storage.setItem('uasc-dfr-load-plan', text);
+          window.location.href = 'planner/?loadPlan=1';
+        } catch (err) {
+          alert('Could not load this plan file. Choose a saved .dfrplan.json file.');
+        } finally {
+          input.value = '';
+        }
+      };
+      reader.readAsText(file);
+    });
+  }
+
   updateUtcClock();
   setInterval(updateUtcClock, 1000);
   document.querySelectorAll('.drop-slot').forEach(wireDropSlot);
   wireAboutModal();
+  wireSavedPlanLoader();
 })();

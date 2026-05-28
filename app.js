@@ -2542,20 +2542,54 @@
     triggerBlobDownload(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `UASC_DFR_Station_Schedule_${new Date().toISOString().slice(0,10)}.csv`);
   };
 
-  document.getElementById('exportBtn').onclick = function() {
-    if (stations.length === 0 && incidents.length === 0) {
-      alert('Nothing to export. Generate incidents and compute a deployment first.');
-      return;
+  function latLngToPlain(ll) {
+    return { lat: Number(ll.lat), lng: Number(ll.lng) };
+  }
+
+  function serializePolygon(layer) {
+    if (!layer) return null;
+    return polygonRings(layer).map(ring => ring.map(latLngToPlain));
+  }
+
+  function polygonFromSaved(rings, style) {
+    if (!Array.isArray(rings) || rings.length === 0) return null;
+    const latLngs = rings.map(ring => ring.map(pt => Array.isArray(pt)
+      ? [Number(pt[1]), Number(pt[0])]
+      : [Number(pt.lat), Number(pt.lng)]
+    ));
+    return L.polygon(latLngs, style || {});
+  }
+
+  function buildEditablePlanPayload() {
+    if (!areaPolygon && stations.length === 0 && incidents.length === 0) {
+      alert('Nothing to save. Define an area, load incidents, or compute a deployment first.');
+      return null;
     }
     const kpi = getKpiParams();
     const totalUnits = stations.reduce((s, x) => s + (x.units || 1), 0);
     const totalShortfall = stations.reduce((s, x) => s + (x.shortfall || 0), 0);
-    const payload = {
-      generated: new Date().toISOString(),
+    const activeStep = parseInt((document.getElementById('app') && document.getElementById('app').dataset.step) || '1', 10) || 1;
+    return {
+      fileType: 'uasc-dfr-plan',
+      version: 1,
+      savedAt: new Date().toISOString(),
       mode: optMode,
+      ui: {
+        step: activeStep,
+        unitSystem,
+        coordFormat,
+        incidentSource
+      },
       mission_profile: {
         incident_period_h: kpi.periodHours,
         service_time_min: kpi.serviceTimeMin
+      },
+      inputs: {
+        minimize_preset: document.getElementById('minimizePreset') ? document.getElementById('minimizePreset').value : 'custom',
+        drone_speed: document.getElementById('droneSpeed') ? document.getElementById('droneSpeed').value : '',
+        manual_radius: document.getElementById('manualRadius') ? document.getElementById('manualRadius').value : '',
+        incident_count: document.getElementById('incidentCount') ? document.getElementById('incidentCount').value : '',
+        distribution: document.getElementById('patternMode') ? document.getElementById('patternMode').value : 'clustered'
       },
       incident_categories: incidentCategories.map(c => ({
         id: c.id,
@@ -2566,6 +2600,17 @@
         effective_fly_time_seconds: effectiveFlyTimeSec(c),
         service_level_target: c.serviceLevel,
         weight: c.weight
+      })),
+      fleet_types: fleetTypes.map(t => ({
+        id: t.id,
+        catalogId: t.catalogId,
+        name: t.name,
+        radius: t.radius,
+        speedKmh: t.speedKmh,
+        serviceTimeMin: t.serviceTimeMin,
+        count: t.count,
+        notes: t.notes || '',
+        color: t.color
       })),
       parameters: optMode === 'minimize' ? {
         drone_speed_mps: inputSpeedToMs(document.getElementById('droneSpeed').value),
@@ -2586,14 +2631,39 @@
       area: areaPolygon ? {
         type: 'Polygon',
         coordinates: [(Array.isArray(areaPolygon.getLatLngs()[0]) ? areaPolygon.getLatLngs()[0] : areaPolygon.getLatLngs()).map(ll => [ll.lng, ll.lat])],
-        area_km2: areaPolygon ? polygonAreaKm2(areaPolygon) : null
+        area_km2: areaPolygon ? polygonAreaKm2(areaPolygon) : null,
+        rings: serializePolygon(areaPolygon)
       } : null,
       constraints: {
         no_fly_zones: noFlyZones.length,
         no_deploy_zones: noDeployZones.length,
-        water_exclusion_zones: waterZones.length
+        water_exclusion_zones: waterZones.length,
+        no_fly_zone_rings: noFlyZones.map(serializePolygon),
+        no_deploy_zone_rings: noDeployZones.map(serializePolygon),
+        water_exclusion_zone_rings: waterZones.map(serializePolygon)
       },
       incidents: incidents.map(i => ({ lat: i.lat, lng: i.lng, t: i.t, category: i.priority })),
+      station_state: stations.map(s => ({
+        lat: s.lat,
+        lng: s.lng,
+        covered: s.covered,
+        incidentIdx: Array.isArray(s.incidentIdx) ? s.incidentIdx.slice() : [],
+        radius: s.radius,
+        typeName: s.typeName,
+        color: s.color,
+        typeId: s.typeId,
+        speedKmh: s.speedKmh,
+        serviceTimeMin: s.serviceTimeMin,
+        unitsRequired: s.unitsRequired,
+        units: s.units,
+        shortfall: s.shortfall || 0,
+        peakConcurrent: s.peakConcurrent,
+        achievedServiceLevel: s.achievedServiceLevel,
+        achievedByPriority: s.achievedByPriority || {},
+        clusterTotals: s.clusterTotals || {},
+        priorityShortfall: s.priorityShortfall || {},
+        avgResponseSec: s.avgResponseSec
+      })),
       sites: stations.map((s, idx) => ({
         id: idx + 1,
         lat: s.lat,
@@ -2616,11 +2686,16 @@
         }))
       }))
     };
+  }
+
+  document.getElementById('exportBtn').onclick = function() {
+    const payload = buildEditablePlanPayload();
+    if (!payload) return;
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `dfr_deployment_${Date.now()}.json`;
+    a.download = `UASC_DFR_Plan_${new Date().toISOString().slice(0,10)}.dfrplan.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -4425,16 +4500,230 @@
   // ============ INCIDENT SOURCE TOGGLE ============
   let incidentSource = 'generate'; // 'generate' | 'upload'
 
+  function setIncidentSource(source) {
+    incidentSource = source === 'upload' ? 'upload' : 'generate';
+    document.querySelectorAll('[data-source]').forEach(b => {
+      b.classList.toggle('active', b.dataset.source === incidentSource);
+    });
+    document.getElementById('generateSourcePanel').style.display = (incidentSource === 'generate') ? 'block' : 'none';
+    document.getElementById('uploadSourcePanel').style.display = (incidentSource === 'upload') ? 'block' : 'none';
+  }
+
   document.querySelectorAll('[data-source]').forEach(btn => {
     btn.onclick = function() {
-      incidentSource = this.dataset.source;
-      document.querySelectorAll('[data-source]').forEach(b => {
-        b.classList.toggle('active', b.dataset.source === incidentSource);
-      });
-      document.getElementById('generateSourcePanel').style.display = (incidentSource === 'generate') ? 'block' : 'none';
-      document.getElementById('uploadSourcePanel').style.display = (incidentSource === 'upload') ? 'block' : 'none';
+      setIncidentSource(this.dataset.source);
     };
   });
+
+  function setInputValue(id, value) {
+    const el = document.getElementById(id);
+    if (!el || value == null) return;
+    el.value = value;
+  }
+
+  function coveredArrayFromStations() {
+    const covered = new Array(incidents.length).fill(false);
+    for (const s of stations) {
+      if (!Array.isArray(s.incidentIdx)) continue;
+      for (const idx of s.incidentIdx) {
+        if (idx >= 0 && idx < covered.length) covered[idx] = true;
+      }
+    }
+    return covered;
+  }
+
+  function refreshPlanMetrics() {
+    if (areaPolygon) {
+      document.getElementById('m-area').innerHTML = formatArea(polygonAreaKm2(areaPolygon));
+      document.getElementById('status1').textContent = `Area defined · ${formatArea(polygonAreaKm2(areaPolygon))}`;
+      document.getElementById('status1').classList.add('good');
+      const dlArea = document.getElementById('downloadArea');
+      if (dlArea) dlArea.disabled = false;
+    }
+    if (incidents.length > 0) {
+      document.getElementById('m-incidents').textContent = incidents.length;
+      document.getElementById('status2').textContent = `${incidents.length} incidents loaded`;
+      document.getElementById('status2').classList.add('good');
+      document.getElementById('optimizeBtn').disabled = false;
+      const dlGenBtn = document.getElementById('downloadGeneratedBtn');
+      if (dlGenBtn) dlGenBtn.disabled = false;
+      updateIncidentStats(window.__lastIncidentStatsMeta || null);
+    }
+    if (stations.length > 0) {
+      const totalUnits = stations.reduce((s, x) => s + (x.units || 1), 0);
+      const covered = coveredArrayFromStations();
+      const coveragePct = incidents.length ? (100 * covered.filter(Boolean).length / incidents.length) : 0;
+      const kpiCompliance = overallKpiCompliance(stations, incidents.length) * 100;
+      document.getElementById('m-stations').textContent = stations.length;
+      document.getElementById('m-units').textContent = totalUnits;
+      document.getElementById('m-coverage').innerHTML = coveragePct.toFixed(1) + '<span class="metric-unit">%</span>';
+      document.getElementById('m-kpi').innerHTML = kpiCompliance.toFixed(1) + '<span class="metric-unit">%</span>';
+      document.getElementById('status3').innerHTML = `<strong>${totalUnits} DroneBox unit${totalUnits === 1 ? '' : 's'}</strong> across ${stations.length} site${stations.length === 1 ? '' : 's'}`;
+      document.getElementById('status3').classList.add('good');
+      window.__lastCurve = computeMarginalCurves(stations, incidents);
+      renderSaturationCurves(window.__lastCurve);
+      renderStationReportList();
+      renderStationDetail(null);
+    }
+    syncStepNavButtons();
+    syncBottomDock();
+  }
+
+  function loadSavedPlan(plan) {
+    if (!plan || (plan.fileType && plan.fileType !== 'uasc-dfr-plan')) {
+      throw new Error('Unsupported plan file');
+    }
+    resetAll();
+
+    const ui = plan.ui || {};
+    unitSystem = ui.unitSystem || unitSystem;
+    coordFormat = ui.coordFormat || coordFormat;
+    setInputValue('unitSystem', unitSystem);
+    setInputValue('coordFormat', coordFormat);
+
+    const profile = plan.mission_profile || {};
+    setInputValue('kpiTimeWindow', profile.incident_period_h);
+    setInputValue('kpiServiceTime', profile.service_time_min);
+
+    const inputs = plan.inputs || {};
+    setInputValue('minimizePreset', inputs.minimize_preset);
+    setInputValue('droneSpeed', inputs.drone_speed);
+    setInputValue('manualRadius', inputs.manual_radius);
+    setInputValue('incidentCount', inputs.incident_count);
+    setInputValue('patternMode', inputs.distribution || (plan.parameters && plan.parameters.distribution));
+
+    if (Array.isArray(plan.incident_categories) && plan.incident_categories.length > 0) {
+      incidentCategories = plan.incident_categories.map(c => ({
+        id: c.id || newCategoryId(),
+        name: c.name || 'Category',
+        color: c.color || CATEGORY_COLOR_POOL[0],
+        kpiSec: c.kpi_seconds != null ? c.kpi_seconds : (c.kpiSec != null ? c.kpiSec : 60),
+        overheadSec: c.overhead_seconds != null ? c.overhead_seconds : (c.overheadSec != null ? c.overheadSec : 15),
+        serviceLevel: c.service_level_target != null ? c.service_level_target : (c.serviceLevel != null ? c.serviceLevel : 0.95),
+        weight: c.weight != null ? c.weight : 1
+      }));
+      renderCategoriesList();
+    }
+
+    modeToggle(plan.mode === 'fleet' ? 'fleet' : 'minimize');
+    if (Array.isArray(plan.fleet_types)) {
+      fleetTypes = plan.fleet_types.map((t, idx) => ({
+        id: t.id || newTypeId(),
+        catalogId: t.catalogId || 'custom',
+        name: t.name || `Drone Type ${idx + 1}`,
+        radius: t.radius || 1000,
+        speedKmh: t.speedKmh != null ? t.speedKmh : 60,
+        serviceTimeMin: t.serviceTimeMin != null ? t.serviceTimeMin : 15,
+        count: t.count != null ? t.count : 0,
+        notes: t.notes || '',
+        color: t.color || TYPE_COLORS[idx % TYPE_COLORS.length]
+      }));
+      renderFleetList();
+    }
+
+    const areaRings = plan.area && (plan.area.rings || plan.area.coordinates);
+    if (areaRings) {
+      areaPolygon = polygonFromSaved(areaRings, { color: '#7CDCE8', weight: 1.5, dashArray: '4,4', fillColor: '#7CDCE8', fillOpacity: 0.12 });
+      if (areaPolygon) areaLayer.addLayer(areaPolygon);
+    }
+
+    const constraints = plan.constraints || {};
+    (constraints.no_fly_zone_rings || []).forEach(rings => {
+      const poly = polygonFromSaved(rings, { color: '#FF6B7E', weight: 1.5, fillColor: '#FF6B7E', fillOpacity: 0.15 });
+      if (poly) addNoFlyZone(poly);
+    });
+    (constraints.no_deploy_zone_rings || []).forEach(rings => {
+      const poly = polygonFromSaved(rings, { color: '#E8A744', weight: 1.5, fillColor: '#E8A744', fillOpacity: 0.15, dashArray: '4,4' });
+      if (poly) addNoDeployZone(poly);
+    });
+    (constraints.water_exclusion_zone_rings || []).forEach(rings => {
+      const poly = polygonFromSaved(rings, { color: '#7CDCE8', weight: 1.5, fillColor: '#7CDCE8', fillOpacity: 0.12, dashArray: '2,3' });
+      if (poly) addWaterZone(poly);
+    });
+
+    incidents = Array.isArray(plan.incidents) ? plan.incidents.map(i => ({
+      lat: Number(i.lat),
+      lng: Number(i.lng),
+      t: Number(i.t || 0),
+      priority: i.priority || i.category || getDefaultCategoryId()
+    })).filter(i => Number.isFinite(i.lat) && Number.isFinite(i.lng)) : [];
+
+    const savedStations = Array.isArray(plan.station_state) ? plan.station_state : (Array.isArray(plan.sites) ? plan.sites : []);
+    stations = savedStations.map(s => ({
+      ...s,
+      lat: Number(s.lat),
+      lng: Number(s.lng),
+      covered: s.covered != null ? s.covered : s.incidents_covered,
+      radius: s.radius != null ? s.radius : s.radius_m,
+      typeName: s.typeName || s.type || 'DFR Station',
+      units: s.units != null ? s.units : s.units_allocated,
+      unitsRequired: s.unitsRequired != null ? s.unitsRequired : s.units_required,
+      achievedServiceLevel: s.achievedServiceLevel != null ? s.achievedServiceLevel : s.service_level_achieved,
+      incidentIdx: Array.isArray(s.incidentIdx) ? s.incidentIdx.slice() : []
+    })).filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lng));
+
+    updateLocalizationLabels();
+    updateRadius();
+    renderIncidents(stations.length > 0 ? coveredArrayFromStations() : null);
+    renderStations(stations);
+    refreshPlanMetrics();
+    setIncidentSource(ui.incidentSource || (incidents.length ? 'upload' : 'generate'));
+
+    const bounds = L.latLngBounds([]);
+    if (areaPolygon) bounds.extend(areaPolygon.getBounds());
+    stations.forEach(s => bounds.extend([s.lat, s.lng]));
+    incidents.forEach(i => bounds.extend([i.lat, i.lng]));
+    if (bounds.isValid()) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
+
+    const targetStep = Math.max(1, Math.min(4, ui.step || (stations.length ? 4 : incidents.length ? 3 : areaPolygon ? 2 : 1)));
+    activateWorkflowStep(targetStep);
+    setFooter('Saved plan loaded');
+  }
+
+  function loadSavedPlanText(text) {
+    loadSavedPlan(JSON.parse(text));
+  }
+
+  function wireSavedPlanImport() {
+    const btn = document.getElementById('loadPlanBtn');
+    const input = document.getElementById('loadPlanInput');
+    if (btn && input) {
+      btn.onclick = () => input.click();
+      input.onchange = () => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            loadSavedPlanText(String(reader.result || ''));
+          } catch (err) {
+            alert('Could not load this plan file. Choose a saved .dfrplan.json file.');
+          } finally {
+            input.value = '';
+          }
+        };
+        reader.readAsText(file);
+      };
+    }
+
+    let storage = null;
+    try {
+      storage = window.sessionStorage || null;
+    } catch (err) {
+      storage = null;
+    }
+    const pending = storage ? storage.getItem('uasc-dfr-load-plan') : null;
+    if (pending) {
+      storage.removeItem('uasc-dfr-load-plan');
+      try {
+        loadSavedPlanText(pending);
+      } catch (err) {
+        alert('Could not load the saved plan from the landing page.');
+      }
+    }
+  }
+
+  wireSavedPlanImport();
 
   // ============ INCIDENT FILE PARSING ============
   // Designed to absorb the most common spreadsheet quirks: messy column names,
