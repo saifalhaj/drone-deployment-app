@@ -492,6 +492,9 @@ code { font-family: 'JetBrains Mono'; font-size: 10.5px; background: var(--surfa
   border-top: 1px solid var(--border);
   display: flex; gap: 8px;
   background: var(--surface-1);
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
 }
 .actions-bar .btn { flex: 1; }
 #reportBtn,
@@ -499,11 +502,17 @@ code { font-family: 'JetBrains Mono'; font-size: 10.5px; background: var(--surfa
 .step3-action {
   display: none;
 }
+#app[data-step="1"] #resetBtn,
+#app[data-step="2"] #resetBtn,
 #app[data-step="3"] .step3-action,
 #app[data-step="4"] #reportBtn,
 #app[data-step="4"] #exportBtn,
 #app[data-step="4"] #resetBtn {
   display: inline-flex;
+}
+#app[data-step="1"] #resetBtn,
+#app[data-step="2"] #resetBtn {
+  order: 1;
 }
 #app[data-step="3"] #backStep3,
 #app[data-step="4"] #reportBtn { order: 1; }
@@ -1115,7 +1124,9 @@ main { background: var(--bg-0); }
 }
 #app[data-step="1"] #panel-kpi,
 #app[data-step="1"] #panel1,
+#app[data-step="1"] .actions-bar,
 #app[data-step="2"] #panel2,
+#app[data-step="2"] .actions-bar,
 #app[data-step="3"] #panel3,
 #app[data-step="3"] .metrics-panel,
 #app[data-step="3"] .actions-bar,
@@ -1123,6 +1134,12 @@ main { background: var(--bg-0); }
 #app[data-step="4"] .metrics-panel,
 #app[data-step="4"] .actions-bar {
   display: block;
+}
+#app[data-step="1"] .actions-bar,
+#app[data-step="2"] .actions-bar,
+#app[data-step="3"] .actions-bar,
+#app[data-step="4"] .actions-bar {
+  display: flex;
 }
 #panel-kpi,
 #panel1,

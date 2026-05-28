@@ -1076,6 +1076,16 @@
     syncStepNavButtons();
   }
 
+  function scrollSidebarToTop() {
+    const sidebar = document.getElementById('sidebar');
+    if (!sidebar) return;
+    sidebar.scrollTop = 0;
+    requestAnimationFrame(() => {
+      sidebar.scrollTop = 0;
+      requestAnimationFrame(() => { sidebar.scrollTop = 0; });
+    });
+  }
+
   function activateWorkflowStep(step) {
     ['panel1', 'panel2', 'panel3', 'panel4'].forEach(id => {
       const el = document.getElementById(id);
@@ -1087,6 +1097,7 @@
     else document.getElementById('panel4').classList.add('active');
     updateWorkflowChrome(step);
     if (step === 4) renderStationReportList();
+    scrollSidebarToTop();
   }
 
   document.querySelectorAll('.rail-step').forEach(btn => {
@@ -2504,6 +2515,7 @@
     clearStationReport();
     window.__lastCurve = null;
     setFooter('Idle');
+    activateWorkflowStep(1);
   }
 
   document.getElementById('resetBtn').onclick = resetAll;
