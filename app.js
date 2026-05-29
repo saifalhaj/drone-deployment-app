@@ -105,6 +105,7 @@
   let heatmapCategoryId = 'all';
   let heatmapHourFilter = 'all';
   let heatmapMonthFilter = 'all';
+  let lastIncidentCoverage = null;
 
   // ============ UTILITIES ============
   function haversine(a, b) {
@@ -1505,6 +1506,27 @@
     return out;
   }
 
+  function randomValidPoint(maxAttempts) {
+    const bounds = areaPolygon.getBounds();
+    const attempts = maxAttempts || 500;
+    for (let i = 0; i < attempts; i++) {
+      const lat = bounds.getSouth() + Math.random() * (bounds.getNorth() - bounds.getSouth());
+      const lng = bounds.getWest() + Math.random() * (bounds.getEast() - bounds.getWest());
+      const p = { lat, lng };
+      if (isValidLocation(p)) return p;
+    }
+    return null;
+  }
+
+  function jitterPointMeters(center, sigmaM) {
+    const dx = gaussianRandom() * sigmaM;
+    const dy = gaussianRandom() * sigmaM;
+    return {
+      lat: center.lat + dy / 111320,
+      lng: center.lng + dx / (111320 * Math.cos(center.lat * Math.PI / 180))
+    };
+  }
+
   function generateClustered(count) {
     const numClusters = 3 + Math.floor(Math.random() * 4);
     const centers = generateUniform(numClusters);
@@ -1557,6 +1579,127 @@
       attempts++;
     }
     return out;
+  }
+
+  function generateCentralPeak(count) {
+    const bounds = areaPolygon.getBounds();
+    const center = bounds.getCenter();
+    const diagonalM = bounds.getSouthWest().distanceTo(bounds.getNorthEast());
+    const out = [];
+    let attempts = 0;
+    const maxAttempts = count * 220;
+    while (out.length < count && attempts < maxAttempts) {
+      const source = Math.random() < 0.78 ? center : (randomValidPoint() || center);
+      const p = jitterPointMeters(source, diagonalM * (Math.random() < 0.78 ? 0.10 : 0.22));
+      if (isValidLocation(p)) out.push(p);
+      attempts++;
+    }
+    return out.length < count ? out.concat(generateUniform(count - out.length)) : out;
+  }
+
+  function generatePerimeterBias(count) {
+    const bounds = areaPolygon.getBounds();
+    const center = bounds.getCenter();
+    const corners = [
+      bounds.getSouthWest(),
+      bounds.getNorthWest(),
+      bounds.getNorthEast(),
+      bounds.getSouthEast()
+    ];
+    const maxDist = Math.max(...corners.map(c => center.distanceTo(c)), 1);
+    const out = [];
+    let attempts = 0;
+    const maxAttempts = count * 300;
+    while (out.length < count && attempts < maxAttempts) {
+      const p = randomValidPoint();
+      if (!p) break;
+      const edgeWeight = Math.pow(center.distanceTo(L.latLng(p.lat, p.lng)) / maxDist, 1.8);
+      if (Math.random() < 0.12 + 0.88 * edgeWeight) out.push(p);
+      attempts++;
+    }
+    return out.length < count ? out.concat(generateUniform(count - out.length)) : out;
+  }
+
+  function generateMultiCorridor(count) {
+    const bounds = areaPolygon.getBounds();
+    const c = bounds.getCenter();
+    const lengthDeg = Math.max(bounds.getNorth() - bounds.getSouth(), bounds.getEast() - bounds.getWest());
+    const corridors = Array.from({ length: 2 + Math.floor(Math.random() * 3) }, () => ({
+      center: randomValidPoint() || c,
+      angle: Math.random() * Math.PI,
+      weight: 0.5 + Math.random()
+    }));
+    const totalWeight = corridors.reduce((sum, x) => sum + x.weight, 0);
+    const out = [];
+    let attempts = 0;
+    const maxAttempts = count * 260;
+    while (out.length < count && attempts < maxAttempts) {
+      let r = Math.random() * totalWeight;
+      let corridor = corridors[0];
+      for (const item of corridors) {
+        r -= item.weight;
+        if (r <= 0) { corridor = item; break; }
+      }
+      const t = (Math.random() - 0.5) * lengthDeg * (0.55 + Math.random() * 0.45);
+      const perp = gaussianRandom() * 0.0028;
+      const dlat = t * Math.cos(corridor.angle) + perp * Math.cos(corridor.angle + Math.PI / 2);
+      const dlng = t * Math.sin(corridor.angle) + perp * Math.sin(corridor.angle + Math.PI / 2);
+      const p = { lat: corridor.center.lat + dlat, lng: corridor.center.lng + dlng };
+      if (isValidLocation(p)) out.push(p);
+      attempts++;
+    }
+    return out.length < count ? out.concat(generateUniform(count - out.length)) : out;
+  }
+
+  function generateGridDemand(count) {
+    const bounds = areaPolygon.getBounds();
+    const rows = 4;
+    const cols = 4;
+    const cells = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const lat = bounds.getSouth() + (r + 0.5) / rows * (bounds.getNorth() - bounds.getSouth());
+        const lng = bounds.getWest() + (c + 0.5) / cols * (bounds.getEast() - bounds.getWest());
+        const center = { lat, lng };
+        if (isValidLocation(center)) {
+          cells.push({ center, weight: 0.25 + Math.random() * Math.random() * 1.5 });
+        }
+      }
+    }
+    if (cells.length === 0) return generateUniform(count);
+    const totalWeight = cells.reduce((sum, cell) => sum + cell.weight, 0);
+    const cellSizeM = Math.max(
+      bounds.getSouthWest().distanceTo(L.latLng(bounds.getSouth(), bounds.getEast())) / cols,
+      bounds.getSouthWest().distanceTo(L.latLng(bounds.getNorth(), bounds.getWest())) / rows
+    );
+    const out = [];
+    let attempts = 0;
+    const maxAttempts = count * 220;
+    while (out.length < count && attempts < maxAttempts) {
+      let r = Math.random() * totalWeight;
+      let cell = cells[0];
+      for (const item of cells) {
+        r -= item.weight;
+        if (r <= 0) { cell = item; break; }
+      }
+      const p = jitterPointMeters(cell.center, cellSizeM * 0.18);
+      if (isValidLocation(p)) out.push(p);
+      attempts++;
+    }
+    return out.length < count ? out.concat(generateUniform(count - out.length)) : out;
+  }
+
+  function generateMixedUrban(count) {
+    const clusterCount = Math.round(count * 0.45);
+    const corridorCount = Math.round(count * 0.25);
+    const perimeterCount = Math.round(count * 0.15);
+    const uniformCount = Math.max(0, count - clusterCount - corridorCount - perimeterCount);
+    return []
+      .concat(generateClustered(clusterCount))
+      .concat(generateMultiCorridor(corridorCount))
+      .concat(generatePerimeterBias(perimeterCount))
+      .concat(generateUniform(uniformCount))
+      .slice(0, count);
   }
 
   // ============ OPTIMIZATION (Greedy Max Coverage + Centroid Refinement) ============
@@ -1856,7 +1999,10 @@
     const cat = document.getElementById('heatmapCategory');
     const hour = document.getElementById('heatmapHour');
     const month = document.getElementById('heatmapMonth');
-    if (enabled) enabled.onchange = function() { heatmapEnabled = this.checked; refreshHeatmap(); };
+    if (enabled) enabled.onchange = function() {
+      heatmapEnabled = this.checked;
+      renderIncidents(lastIncidentCoverage);
+    };
     if (mode) mode.onchange = function() { heatmapMode = this.value; refreshHeatmap(); };
     if (cat) cat.onchange = function() { heatmapCategoryId = this.value; refreshHeatmap(); };
     if (hour) hour.onchange = function() { heatmapHourFilter = this.value; refreshHeatmap(); };
@@ -1868,7 +2014,12 @@
 
   // ============ RENDERING ============
   function renderIncidents(coveredArr) {
+    lastIncidentCoverage = Array.isArray(coveredArr) ? coveredArr.slice() : coveredArr;
     incidentLayer.clearLayers();
+    if (heatmapEnabled) {
+      refreshHeatmap();
+      return;
+    }
     // Higher-weight categories render larger; uncovered get a contrasting outline
     const weights = incidentCategories.map(c => c.weight || 0);
     const maxW = Math.max(1, ...weights);
@@ -2525,6 +2676,12 @@
     if (mode === 'uniform') incidents = generateUniform(count);
     else if (mode === 'clustered') incidents = generateClustered(count);
     else if (mode === 'corridor') incidents = generateCorridor(count);
+    else if (mode === 'central') incidents = generateCentralPeak(count);
+    else if (mode === 'perimeter') incidents = generatePerimeterBias(count);
+    else if (mode === 'multi-corridor') incidents = generateMultiCorridor(count);
+    else if (mode === 'grid') incidents = generateGridDemand(count);
+    else if (mode === 'mixed') incidents = generateMixedUrban(count);
+    else incidents = generateClustered(count);
 
     // Assign timestamps over the configured time window
     assignTimestamps(incidents, getKpiParams().periodHours);
