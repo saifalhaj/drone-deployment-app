@@ -488,6 +488,9 @@ code { font-family: 'JetBrains Mono'; font-size: 10.5px; background: var(--surfa
 .dfr-heatmap-layer {
   mix-blend-mode: screen;
   pointer-events: none;
+  transform-origin: 0 0;
+  will-change: transform;
+  backface-visibility: hidden;
 }
 #fleetList:empty + #addTypeBtn { margin-top: 0; }
 
@@ -623,25 +626,53 @@ code { font-family: 'JetBrains Mono'; font-size: 10.5px; background: var(--surfa
 .metric-unit { font-size: 11px; color: var(--text-muted); margin-left: 3px; }
 .metric.highlight .metric-value { color: var(--accent); }
 .metric.coverage-metric .metric-value { color: var(--coverage); }
+#app:not(.has-deployment) .metric.compute-metric {
+  display: none;
+}
 
 .actions-bar {
   padding: 14px 20px;
   border-top: 1px solid var(--border);
-  display: flex; gap: 8px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
   background: var(--surface-1);
   position: sticky;
   bottom: 0;
   z-index: 20;
 }
-.actions-bar .btn { flex: 1; }
+.actions-zone {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+.actions-files { flex: 0 1 48%; justify-content: flex-start; }
+.actions-workflow { flex: 1 1 52%; justify-content: flex-end; }
+.actions-zone .btn { flex: 0 1 auto; min-width: 86px; }
+.actions-workflow .btn-primary { min-width: 150px; }
+.btn-soft-danger {
+  opacity: 0.78;
+  border-color: rgba(227,139,149,0.32) !important;
+  color: var(--text-muted) !important;
+  background: transparent !important;
+}
+.btn-soft-danger:hover {
+  opacity: 1;
+  color: #f2c1c7 !important;
+  background: rgba(227,139,149,0.08) !important;
+}
 #reportBtn,
 #exportBtn,
+.step4-action,
 .step3-action {
   display: none;
 }
 #app[data-step="1"] #resetBtn,
 #app[data-step="2"] #resetBtn,
 #app[data-step="3"] .step3-action,
+#app[data-step="4"] .step4-action,
 #app[data-step="4"] #reportBtn,
 #app[data-step="4"] #exportBtn,
 #app[data-step="4"] #resetBtn {
@@ -651,13 +682,12 @@ code { font-family: 'JetBrains Mono'; font-size: 10.5px; background: var(--surfa
 #app[data-step="2"] #resetBtn {
   order: 1;
 }
-#app[data-step="3"] #backStep3,
-#app[data-step="4"] #reportBtn { order: 1; }
+#app[data-step="3"] #backStep3 { order: 1; }
 #app[data-step="3"] #resetBtn,
-#app[data-step="4"] #exportBtn { order: 2; }
-#app[data-step="3"] #continueStep3,
-#app[data-step="4"] #resetBtn { order: 3; }
-#app[data-step="4"] #resetBtn { order: 3 !important; }
+#app[data-step="4"] #resetBtn { order: 2; }
+#app[data-step="3"] #continueStep3 { order: 3; }
+#app[data-step="4"] .actions-files { flex-basis: 58%; }
+#app[data-step="4"] .actions-workflow { flex-basis: 42%; }
 
 /* Custom leaflet draw toolbar styling */
 .leaflet-draw .leaflet-draw-toolbar a { background-color: var(--surface-2) !important; border-color: var(--border) !important; }
@@ -1615,6 +1645,29 @@ input {
 .station-row:hover,
 .station-row.selected {
   background: rgba(124,220,232,0.13);
+}
+.station-row-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  cursor: default;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+.station-row-header:hover { background: var(--surface-2); }
+.station-row-total {
+  background: rgba(220,230,239,0.055);
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+  font-weight: 700;
+}
+.station-row-total b,
+.station-row-total em,
+.station-row-total > span:first-child {
+  font-weight: 700;
 }
 .station-row span,
 .station-row b,

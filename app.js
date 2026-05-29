@@ -12,8 +12,9 @@
   if (logoImg) logoImg.src = UASC_LOGO_WHITE;
 
   // ============ MAP SETUP ============
-  const map = L.map('map', { zoomControl: true, attributionControl: true })
+  const map = L.map('map', { zoomControl: true, attributionControl: true, preferCanvas: true })
     .setView([25.2048, 55.2708], 11);
+  const canvasRenderer = L.canvas({ padding: 0.5, pane: 'overlayPane' });
 
   const streets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap',
@@ -40,9 +41,6 @@
   const incidentLayer = new L.LayerGroup().addTo(map);
   const stationLayer = new L.LayerGroup().addTo(map);
   const selectedStationLayer = new L.LayerGroup().addTo(map);
-  map.createPane('heatmapPane');
-  map.getPane('heatmapPane').style.zIndex = 405;
-  map.getPane('heatmapPane').style.pointerEvents = 'none';
 
   // Drawing handled by custom controls in sidebar (see EVENTS section)
 
@@ -54,13 +52,15 @@
     },
     onAdd(targetMap) {
       this._map = targetMap;
-      this._canvas = L.DomUtil.create('canvas', 'dfr-heatmap-layer leaflet-layer');
-      targetMap.getPane('heatmapPane').appendChild(this._canvas);
-      targetMap.on('move zoom resize viewreset', this._scheduleDraw, this);
+      this._canvas = L.DomUtil.create('canvas', 'dfr-heatmap-layer leaflet-layer leaflet-zoom-animated');
+      targetMap.getPane('overlayPane').appendChild(this._canvas);
+      targetMap.on('moveend zoomend resize viewreset', this._scheduleDraw, this);
+      targetMap.on('zoomanim', this._animateZoom, this);
       this._reset();
     },
     onRemove(targetMap) {
-      targetMap.off('move zoom resize viewreset', this._scheduleDraw, this);
+      targetMap.off('moveend zoomend resize viewreset', this._scheduleDraw, this);
+      targetMap.off('zoomanim', this._animateZoom, this);
       if (this._frame) L.Util.cancelAnimFrame(this._frame);
       L.DomUtil.remove(this._canvas);
       this._canvas = null;
@@ -86,6 +86,12 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, size.x, size.y);
       this._drawFn(ctx, size);
+    },
+    _animateZoom(e) {
+      if (!this._map || !this._canvas) return;
+      const scale = this._map.getZoomScale(e.zoom);
+      const offset = this._map._latLngBoundsToNewLayerBounds(this._map.getBounds(), e.zoom, e.center).min;
+      L.DomUtil.setTransform(this._canvas, offset, scale);
     }
   });
 
@@ -1591,6 +1597,12 @@
     }
   }
 
+  function setDeploymentSnapshotVisible(hasDeployment) {
+    const app = document.getElementById('app');
+    if (app) app.classList.toggle('has-deployment', !!hasDeployment);
+    syncBottomDock();
+  }
+
   function syncStepNavButtons() {
     const step1 = document.getElementById('continueStep1');
     const step2 = document.getElementById('continueStep2');
@@ -1674,6 +1686,14 @@
   document.getElementById('backStep4').onclick = () => activateWorkflowStep(3);
 
   updateWorkflowChrome(1);
+  function syncOperationIdLabel() {
+    const input = document.getElementById('operationIdInput');
+    const label = document.getElementById('railOperationId');
+    if (label && input) label.textContent = (input.value || 'OP-2026-0341').trim() || 'OP-2026-0341';
+  }
+  const operationIdInput = document.getElementById('operationIdInput');
+  if (operationIdInput) operationIdInput.oninput = syncOperationIdLabel;
+  syncOperationIdLabel();
   setInterval(() => {
     const el = document.getElementById('utcClock');
     if (!el) return;
@@ -3112,6 +3132,7 @@
     document.getElementById('m-units').textContent = Math.round(result.intervals.unitCount.median);
     document.getElementById('m-coverage').innerHTML = `${confidencePct}<span class="metric-unit">% CI</span>`;
     document.getElementById('m-kpi').innerHTML = `${result.intervals.kpiPct.median.toFixed(1)}<span class="metric-unit">%</span>`;
+    setDeploymentSnapshotVisible(true);
     let statusHtml = `<strong>Monte Carlo complete</strong> - ${result.summaries.length} runs in ${(result.runtimeMs / 1000).toFixed(1)}s`;
     statusHtml += `<br>Robust core: ${robustCount} station bin${robustCount === 1 ? '' : 's'} @ ${result.settings.robustCoreThresholdPct}% threshold`;
     statusHtml += `<br>Median KPI: ${result.intervals.kpiPct.median.toFixed(1)}% | ${confidencePct}% KPI CI ${formatInterval(result.intervals.kpiPct)}%`;
@@ -3494,11 +3515,11 @@
       if (inNoFly) {
         const sp = standoffPoint(inc);
         L.polyline([[inc.lat, inc.lng], [sp.lat, sp.lng]], {
-          color: cat.color, weight: 1, dashArray: '2,3', opacity: 0.7
+          color: cat.color, weight: 1, dashArray: '2,3', opacity: 0.7, renderer: canvasRenderer
         }).addTo(incidentLayer);
         L.circleMarker([sp.lat, sp.lng], {
           radius: 3, color: cat.color, fillColor: 'transparent',
-          fillOpacity: 0, weight: 1.5, opacity: 0.9
+          fillOpacity: 0, weight: 1.5, opacity: 0.9, renderer: canvasRenderer
         }).bindTooltip(cat.name + ' · drone standoff', { direction: 'top', offset: [0, -4] })
           .addTo(incidentLayer);
       }
@@ -3511,7 +3532,8 @@
         fillColor: cat.color,
         fillOpacity: inNoFly ? 0.55 : 0.85,
         weight: isHighPrio ? 2 : 1,
-        dashArray: inNoFly ? '2,2' : null
+        dashArray: inNoFly ? '2,2' : null,
+        renderer: canvasRenderer
       }).bindTooltip(cat.name + (inNoFly ? ' - inside no-fly' : ''), { direction: 'top', offset: [0, -4] })
         .addTo(incidentLayer);
     }
@@ -3534,7 +3556,8 @@
         fillColor: color,
         fillOpacity: 0.05,
         weight: 0.7,
-        dashArray: '2,3'
+        dashArray: '2,3',
+        renderer: canvasRenderer
       }).addTo(coverageLayer);
 
       const badge = units > 1
@@ -3628,7 +3651,15 @@
     const allKpi = (100 * overallKpiCompliance(stations, incidents.length)).toFixed(1);
     const networkLoad = buildNetworkLoadSummary();
     const allLoadCls = networkLoad.loadPct >= 85 || networkLoad.queueRiskPct >= 10 ? 'hot' : networkLoad.loadPct >= 60 || networkLoad.queueRiskPct >= 3 ? 'warn' : '';
-    const allRow = `<button class="station-row ${selectedStationIndex === 'all' ? 'selected' : ''}" type="button" data-station-index="all">
+    const headerRow = `<div class="station-row station-row-header" aria-hidden="true">
+        <span>#</span>
+        <span>NAME</span>
+        <em>INC</em>
+        <em>UNITS</em>
+        <em>LOAD</em>
+        <em>KPI</em>
+      </div>`;
+    const allRow = `<button class="station-row station-row-total ${selectedStationIndex === 'all' ? 'selected' : ''}" type="button" data-station-index="all">
         <span>ALL</span>
         <span><b>All DFR Stations</b><small>Network-wide station stats</small></span>
         <em>${totalCovered}</em>
@@ -3636,7 +3667,7 @@
         <em class="load ${allLoadCls}">${networkLoad.loadPct.toFixed(0)}%</em>
         <em class="kpi">${allKpi}%</em>
       </button>`;
-    reportList.innerHTML = allRow + stations.map((s, idx) => {
+    const stationRows = stations.map((s, idx) => {
       const coord = formatCoordinate(s.lat, s.lng);
       const units = s.units || 1;
       const siteKpi = ((s.achievedServiceLevel || 0) * 100).toFixed(1);
@@ -3653,6 +3684,7 @@
         <em class="kpi">${siteKpi}%</em>
       </button>`;
     }).join('');
+    reportList.innerHTML = headerRow + stationRows + allRow;
     reportList.querySelectorAll('[data-station-index]').forEach(btn => {
       btn.onclick = () => btn.dataset.stationIndex === 'all'
         ? selectAllStations(true)
@@ -3928,21 +3960,24 @@
       weight: 1.2,
       dashArray: '2,3',
       fillColor: color,
-      fillOpacity: 0.12
+      fillOpacity: 0.12,
+      renderer: canvasRenderer
     }).addTo(selectedStationLayer);
     L.circleMarker([s.lat, s.lng], {
       radius: 12,
       color,
       weight: 2.5,
       fillColor: '#06080B',
-      fillOpacity: 1
+      fillOpacity: 1,
+      renderer: canvasRenderer
     }).addTo(selectedStationLayer);
     L.circleMarker([s.lat, s.lng], {
       radius: 4,
       color,
       weight: 1,
       fillColor: color,
-      fillOpacity: 1
+      fillOpacity: 1,
+      renderer: canvasRenderer
     }).addTo(selectedStationLayer);
     const units = s.units || 1;
     const siteKpi = ((s.achievedServiceLevel || 0) * 100).toFixed(1);
@@ -3993,14 +4028,16 @@
         weight: 1,
         dashArray: '2,3',
         fillColor: color,
-        fillOpacity: 0.08
+        fillOpacity: 0.08,
+        renderer: canvasRenderer
       }).addTo(selectedStationLayer);
       L.circleMarker([s.lat, s.lng], {
         radius: 7,
         color,
         weight: 2,
         fillColor: '#06080B',
-        fillOpacity: 1
+        fillOpacity: 1,
+        renderer: canvasRenderer
       }).bindTooltip(`DFR Station ${String(idx + 1).padStart(2, '0')}`, {
         direction: 'top',
         opacity: 0.9
@@ -4039,6 +4076,7 @@
     document.getElementById('m-coverage').textContent = '-';
     document.getElementById('m-units').textContent = '-';
     document.getElementById('m-kpi').textContent = '-';
+    setDeploymentSnapshotVisible(false);
     document.getElementById('status3').textContent = incidents.length > 0 ? 'Ready to optimize' : 'No deployment computed';
     document.getElementById('status3').classList.remove('good');
     clearStationReport();
@@ -4144,9 +4182,9 @@
     if (polygonPoints.length === 0) return;
     const pts = hoverPoint ? polygonPoints.concat([hoverPoint, polygonPoints[0]]) : polygonPoints.slice();
     if (pts.length >= 2) {
-      tempPreview = L.polyline(pts, { color: '#7CDCE8', weight: 1.5, dashArray: '4,4', opacity: 0.9 }).addTo(map);
+      tempPreview = L.polyline(pts, { color: '#7CDCE8', weight: 1.5, dashArray: '4,4', opacity: 0.9, renderer: canvasRenderer }).addTo(map);
     } else {
-      tempPreview = L.circleMarker(pts[0], { radius: 4, color: '#7CDCE8', fillColor: '#7CDCE8', fillOpacity: 1 }).addTo(map);
+      tempPreview = L.circleMarker(pts[0], { radius: 4, color: '#7CDCE8', fillColor: '#7CDCE8', fillOpacity: 1, renderer: canvasRenderer }).addTo(map);
     }
   }
   function onPolyFinish(e) {
@@ -4254,6 +4292,7 @@
     document.getElementById('m-coverage').textContent = '—';
     document.getElementById('m-units').textContent = '—';
     document.getElementById('m-kpi').textContent = '—';
+    setDeploymentSnapshotVisible(false);
 
     setPanelState('panel1', 'active');
     setPanelState('panel2', null);
@@ -4350,6 +4389,7 @@
     document.getElementById('m-coverage').textContent = '—';
     document.getElementById('m-units').textContent = '—';
     document.getElementById('m-kpi').textContent = '—';
+    setDeploymentSnapshotVisible(false);
     clearStationReport();
     updateIncidentStats({ realTimestamps: false });
     syncStepNavButtons();
@@ -4581,6 +4621,7 @@
         document.getElementById('m-units').textContent = totalUnits;
         document.getElementById('m-coverage').innerHTML = result.coveragePercent.toFixed(1) + '<span class="metric-unit">%</span>';
         document.getElementById('m-kpi').innerHTML = (kpiCompliance * 100).toFixed(1) + '<span class="metric-unit">%</span>';
+        setDeploymentSnapshotVisible(true);
 
         // Marginal-value curves
         const curve = computeMarginalCurves(stations, simulationIncidents);
@@ -4649,6 +4690,7 @@
     ['m-area', 'm-incidents', 'm-stations', 'm-coverage', 'm-units', 'm-kpi'].forEach(id => {
       document.getElementById(id).textContent = '—';
     });
+    setDeploymentSnapshotVisible(false);
     const statsBlock = document.getElementById('incidentStatsBlock');
     if (statsBlock) statsBlock.style.display = 'none';
     const chartBlock = document.getElementById('marginalChart');
@@ -7013,6 +7055,7 @@
       document.getElementById('m-units').textContent = totalUnits;
       document.getElementById('m-coverage').innerHTML = coveragePct.toFixed(1) + '<span class="metric-unit">%</span>';
       document.getElementById('m-kpi').innerHTML = kpiCompliance.toFixed(1) + '<span class="metric-unit">%</span>';
+      setDeploymentSnapshotVisible(true);
       document.getElementById('status3').innerHTML = `<strong>${totalUnits} DroneBox unit${totalUnits === 1 ? '' : 's'}</strong> across ${stations.length} site${stations.length === 1 ? '' : 's'}<br>Network load: ${networkLoad.loadPct.toFixed(0)}% | queue risk ${networkLoad.queueRiskPct.toFixed(0)}%`;
       document.getElementById('status3').classList.add('good');
       window.__lastCurve = computeMarginalCurves(stations, incidents);
@@ -7722,6 +7765,7 @@
     document.getElementById('m-coverage').textContent = '—';
     document.getElementById('m-units').textContent = '—';
     document.getElementById('m-kpi').textContent = '—';
+    setDeploymentSnapshotVisible(false);
     clearStationReport();
 
     updateIncidentStats({ realTimestamps: true, anchorMs: result.anchorMs, spanHours: result.spanHours });

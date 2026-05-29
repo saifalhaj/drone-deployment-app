@@ -34,8 +34,8 @@
  <main>
  <nav id="stepRail" aria-label="Planning workflow">
  <div class="rail-head">
- <span>Planning Workflow</span>
- <strong>Mission Build</strong>
+ <span>Operation ID</span>
+ <strong id="railOperationId">OP-2026-0341</strong>
  </div>
  <button class="rail-step active" data-step-jump="1" type="button">
  <span class="rail-num">01</span>
@@ -598,7 +598,7 @@
  <div class="field-grid">
  <div class="field">
  <label class="field-label">Operation ID</label>
- <input value="OP-2026-0341">
+ <input id="operationIdInput" value="OP-2026-0341">
 </div>
 <div class="field">
 <label class="field-label">Classification</label>
@@ -619,9 +619,6 @@
  <div class="station-empty">Select a DFR station from the list to zoom the map and inspect platform, units, response time, and demand mix.</div>
  </div>
  </div>
- <div class="step-footer">
- <button class="btn btn-ghost" id="backStep4">Back</button>
- </div>
  </div>
 
  <div class="metrics-panel">
@@ -638,19 +635,19 @@
  <div class="metric-label">Incidents</div>
  <div class="metric-value" id="m-incidents">-</div>
  </div>
- <div class="metric">
+ <div class="metric compute-metric">
  <div class="metric-label">Sites</div>
  <div class="metric-value" id="m-stations">-</div>
  </div>
- <div class="metric highlight">
+ <div class="metric highlight compute-metric">
  <div class="metric-label">DroneBox Units</div>
  <div class="metric-value" id="m-units">-</div>
  </div>
- <div class="metric coverage-metric">
+ <div class="metric coverage-metric compute-metric">
  <div class="metric-label">Geographic Cov.</div>
  <div class="metric-value" id="m-coverage">-</div>
  </div>
- <div class="metric coverage-metric">
+ <div class="metric coverage-metric compute-metric">
  <div class="metric-label">KPI Compliance</div>
  <div class="metric-value" id="m-kpi">-</div>
  </div>
@@ -665,12 +662,17 @@
  </div>
 
  <div class="actions-bar">
- <button class="btn btn-ghost step3-action" id="backStep3">Back</button>
- <button class="btn btn-secondary step3-action" id="resetBtn">Reset</button>
- <button class="btn btn-primary step3-action" id="continueStep3" disabled>Continue to Report</button>
- <button class="btn btn-primary" id="reportBtn">Generate PDF</button>
- <button class="btn btn-ghost" id="exportBtn">Save Plan</button>
+ <div class="actions-zone actions-files" aria-label="File operations">
  <button class="btn btn-ghost" id="loadPlanBtn">Load Plan</button>
+ <button class="btn btn-ghost" id="exportBtn">Save Plan</button>
+ <button class="btn btn-primary" id="reportBtn">Generate PDF</button>
+ </div>
+ <div class="actions-zone actions-workflow" aria-label="Workflow navigation">
+ <button class="btn btn-ghost step3-action" id="backStep3">Back</button>
+ <button class="btn btn-ghost step4-action" id="backStep4">Back</button>
+ <button class="btn btn-secondary btn-soft-danger step3-action" id="resetBtn">Reset</button>
+ <button class="btn btn-primary step3-action" id="continueStep3" disabled>Continue to Report</button>
+ </div>
  <input type="file" id="loadPlanInput" accept=".json,.dfrplan,.dfrplan.json,application/json" hidden>
  </div>
 
