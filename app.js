@@ -107,6 +107,69 @@
   let heatmapMonthFilter = 'all';
   let lastIncidentCoverage = null;
 
+  // ============ PLANNING MODE SCAFFOLD ============
+  const SAVED_PLAN_VERSION = 2;
+  const PLANNING_MODE = {
+    DIRECT_FIT: 'direct-fit',
+    SMOOTHED_GROWTH: 'smoothed-growth',
+    MONTE_CARLO: 'monte-carlo'
+  };
+
+  function createDefaultPlanningModeState() {
+    return {
+      mode: PLANNING_MODE.DIRECT_FIT,
+      directFit: {
+        coverageTargetPct: 90,
+        minIncidentsPerSite: 2,
+        warningAcknowledged: false
+      },
+      smoothedGrowth: {
+        gridResolution: 100,
+        bandwidthMode: 'auto-silverman',
+        bandwidthMeters: null,
+        growthMultiplier: 1,
+        demandThresholdPct: 1,
+        useCategoryWeights: true
+      },
+      monteCarlo: {
+        runCount: 30,
+        growthMultiplier: 1,
+        confidenceLevel: 0.9,
+        robustCoreThresholdPct: 60,
+        randomSeed: null,
+        maxRuntimeSec: 60,
+        visualizationMode: 'consensus-overlay'
+      },
+      activeResultId: null,
+      cachedResults: {}
+    };
+  }
+
+  function mergePlanningModeState(raw) {
+    const defaults = createDefaultPlanningModeState();
+    if (!raw || typeof raw !== 'object') return defaults;
+    const validMode = Object.values(PLANNING_MODE).includes(raw.mode) ? raw.mode : defaults.mode;
+    return {
+      ...defaults,
+      ...raw,
+      mode: validMode,
+      directFit: { ...defaults.directFit, ...(raw.directFit || {}) },
+      smoothedGrowth: { ...defaults.smoothedGrowth, ...(raw.smoothedGrowth || {}) },
+      monteCarlo: { ...defaults.monteCarlo, ...(raw.monteCarlo || {}) },
+      cachedResults: raw.cachedResults && typeof raw.cachedResults === 'object' ? raw.cachedResults : {}
+    };
+  }
+
+  function normalizeSavedPlanEnvelope(plan) {
+    if (!plan || typeof plan !== 'object') return plan;
+    const normalized = { ...plan };
+    normalized.version = Number(normalized.version || 1);
+    normalized.planningModeState = mergePlanningModeState(normalized.planningModeState);
+    return normalized;
+  }
+
+  let planningModeState = createDefaultPlanningModeState();
+
   // ============ UTILITIES ============
   function haversine(a, b) {
     const R = 6371000;
@@ -3211,9 +3274,17 @@
     const activeStep = parseInt((document.getElementById('app') && document.getElementById('app').dataset.step) || '1', 10) || 1;
     return {
       fileType: 'uasc-dfr-plan',
-      version: 1,
+      version: SAVED_PLAN_VERSION,
       savedAt: new Date().toISOString(),
       mode: optMode,
+      planningModeState: mergePlanningModeState({
+        ...planningModeState,
+        directFit: {
+          ...planningModeState.directFit,
+          coverageTargetPct: planning.coverageTargetPct,
+          minIncidentsPerSite: planning.minIncidentsPerSite
+        }
+      }),
       ui: {
         step: activeStep,
         unitSystem,
@@ -5270,10 +5341,12 @@
   }
 
   function loadSavedPlan(plan) {
+    plan = normalizeSavedPlanEnvelope(plan);
     if (!plan || (plan.fileType && plan.fileType !== 'uasc-dfr-plan')) {
       throw new Error('Unsupported plan file');
     }
     resetAll();
+    planningModeState = mergePlanningModeState(plan.planningModeState);
 
     const ui = plan.ui || {};
     unitSystem = ui.unitSystem || unitSystem;
