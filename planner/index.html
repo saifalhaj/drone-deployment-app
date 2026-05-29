@@ -447,6 +447,19 @@
  <span class="panel-title">Compute Deployment</span>
  </div>
  <p class="help">Runs the time-aware optimizer using your Mission and Toolkit settings, area, and incident pattern. Stations are sized to handle observed concurrent demand - not just average load.</p>
+ <div class="subsection-label">Planning Realism</div>
+ <div class="field-row">
+ <div class="field">
+ <label class="field-label">Coverage Target (%)</label>
+ <input type="number" id="geoCoverageTarget" value="90" min="50" max="100" step="1">
+ <div class="field-desc">Stops once recurring demand is covered instead of chasing every outlier</div>
+ </div>
+ <div class="field">
+ <label class="field-label">Min Incidents / Site</label>
+ <input type="number" id="minIncidentsPerSite" value="2" min="1" max="25" step="1">
+ <div class="field-desc">Avoids recommending a station for a single historical call</div>
+ </div>
+ </div>
  <button class="btn btn-primary" id="optimizeBtn" disabled>Compute Deployment</button>
  <div class="status-line" id="status3">No deployment computed</div>
  </div>

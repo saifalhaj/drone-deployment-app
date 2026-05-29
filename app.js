@@ -600,6 +600,24 @@
     };
   }
 
+  function getPlanningParams() {
+    const targetEl = document.getElementById('geoCoverageTarget');
+    const minGainEl = document.getElementById('minIncidentsPerSite');
+    const targetPct = Math.max(50, Math.min(100, parseFloat(targetEl && targetEl.value) || 90));
+    const minIncidentsPerSite = Math.max(1, Math.floor(parseFloat(minGainEl && minGainEl.value) || 2));
+    return {
+      coverageTarget: targetPct / 100,
+      coverageTargetPct: targetPct,
+      minIncidentsPerSite
+    };
+  }
+
+  function requiredCoverageCount(totalIncidents, planning) {
+    if (totalIncidents <= 0) return 0;
+    const target = planning && planning.coverageTarget != null ? planning.coverageTarget : 1;
+    return Math.min(totalIncidents, Math.ceil(totalIncidents * target));
+  }
+
   // Erlang B: probability of blocking (no server free) given c servers and rho Erlangs of traffic
   // ============ TIME-AWARE LOSS-MODEL SIMULATION ============
   // Uses actual incident timestamps to size capacity for observed concurrent demand.
@@ -1715,10 +1733,12 @@
   // The `radius` argument is the FALLBACK / DEFAULT radius (used for the radius
   // field on each station object and for rendering the coverage circle). The
   // per-incident radii are computed below from each incident's category.
-  function greedyMaxCoverage(incidents, radius) {
+  function greedyMaxCoverage(incidents, radius, planning) {
     const n = incidents.length;
+    planning = planning || getPlanningParams();
     const covered = new Array(n).fill(false);
-    const targetCount = n;
+    const targetCount = requiredCoverageCount(n, planning);
+    const minGain = Math.max(1, planning.minIncidentsPerSite || 1);
     let numCovered = 0;
     const stations = [];
 
@@ -1800,6 +1820,7 @@
       }
 
       if (bestIdx === -1 || bestSet.length === 0) break;
+      if (bestSet.length < minGain) break;
 
       // Centroid refinement — same per-category-radius check from candidate's
       // perspective, since centroid moves the station.
@@ -1841,7 +1862,14 @@
       }
     }
 
-    return { stations, covered, coveragePercent: 100 * numCovered / n };
+    return {
+      stations,
+      covered,
+      coveragePercent: 100 * numCovered / n,
+      targetCoveragePercent: planning.coverageTargetPct,
+      minIncidentsPerSite: minGain,
+      targetMet: numCovered >= targetCount
+    };
   }
 
   // ============ INCIDENT HEATMAP ============
@@ -2142,15 +2170,16 @@
     }
   }
 
-  function renderSaturationCurves(curve) {
+  function renderSaturationCurves(curve, planning) {
     const chartBlock = document.getElementById('marginalChart');
     const dpr = window.devicePixelRatio || 1;
+    const geoTarget = planning && planning.coverageTargetPct ? planning.coverageTargetPct : 100;
     if (chartBlock && curve.k.length > 0) {
       chartBlock.style.display = 'block';
       renderMarginalChart(document.getElementById('canvasCov'), curve, {
         series: 'coverage', title: 'Geo Coverage',
         lineColor: '#7CDCE8', fillColor: 'rgba(124,220,232,0.10)',
-        width: chartBlock.clientWidth - 20, height: 58, dpr: dpr, hud: true
+        width: chartBlock.clientWidth - 20, height: 58, dpr: dpr, hud: true, target: geoTarget
       });
       renderMarginalChart(document.getElementById('canvasKpi'), curve, {
         series: 'kpi', title: 'KPI Compliance',
@@ -2775,11 +2804,12 @@
     setTimeout(function() {
       try {
         let result;
+        const planning = getPlanningParams();
         if (optMode === 'minimize') {
           const radius = updateRadius();
-          result = greedyMaxCoverage(incidents, radius);
+          result = greedyMaxCoverage(incidents, radius, planning);
         } else {
-          result = greedyHeterogeneous(incidents, fleetTypes);
+          result = greedyHeterogeneous(incidents, fleetTypes, planning);
         }
 
         // Apply concurrency sizing (Erlang B) per cluster
@@ -2814,6 +2844,10 @@
         }).join(' ');
 
         let statusText = `<strong>${totalUnits} DroneBox unit${totalUnits === 1 ? '' : 's'}</strong> across ${stations.length} site${stations.length === 1 ? '' : 's'}<br>${pillsHtml}`;
+        statusText += `<br>Geographic coverage: ${result.coveragePercent.toFixed(1)}% / ${planning.coverageTargetPct.toFixed(0)}% target`;
+        if (!result.targetMet) {
+          statusText += `<br><span style="color:var(--incident)">Target stopped early: next station would cover fewer than ${planning.minIncidentsPerSite} incident${planning.minIncidentsPerSite === 1 ? '' : 's'}</span>`;
+        }
         if (optMode === 'fleet' && result.inventoryUsed) {
           const used = result.inventoryUsed.filter(t => t.used > 0).map(t => `${t.used}× ${t.name}`).join(' · ');
           if (used) statusText += '<br>Initial placement: ' + used;
@@ -2832,7 +2866,7 @@
         // Marginal-value curves
         const curve = computeMarginalCurves(stations, incidents);
         window.__lastCurve = curve; // saved for PDF export
-        renderSaturationCurves(curve);
+        renderSaturationCurves(curve, planning);
         renderStationReportList();
         renderStationDetail(null);
 
@@ -2949,6 +2983,7 @@
       return null;
     }
     const kpi = getKpiParams();
+    const planning = getPlanningParams();
     const totalUnits = stations.reduce((s, x) => s + (x.units || 1), 0);
     const totalShortfall = stations.reduce((s, x) => s + (x.shortfall || 0), 0);
     const activeStep = parseInt((document.getElementById('app') && document.getElementById('app').dataset.step) || '1', 10) || 1;
@@ -2972,7 +3007,9 @@
       },
       mission_profile: {
         incident_period_h: kpi.periodHours,
-        service_time_min: kpi.serviceTimeMin
+        service_time_min: kpi.serviceTimeMin,
+        geographic_coverage_target: planning.coverageTarget,
+        min_incidents_per_site: planning.minIncidentsPerSite
       },
       inputs: {
         minimize_preset: document.getElementById('minimizePreset') ? document.getElementById('minimizePreset').value : 'custom',
@@ -3357,11 +3394,14 @@
   })();
 
   // ============ HETEROGENEOUS GREEDY MAX COVERAGE ============
-  function greedyHeterogeneous(incidents, types) {
+  function greedyHeterogeneous(incidents, types, planning) {
     const n = incidents.length;
     if (n === 0 || types.length === 0) {
       return { stations: [], covered: new Array(n).fill(false), coveragePercent: 0, inventoryUsed: [], remainingByType: {} };
     }
+    planning = planning || getPlanningParams();
+    const targetCount = requiredCoverageCount(n, planning);
+    const minGain = Math.max(1, planning.minIncidentsPerSite || 1);
 
     // Working copy of inventory
     const inventory = types.map(t => ({
@@ -3439,7 +3479,7 @@
       return blocked;
     }
 
-    while (numCovered < n) {
+    while (numCovered < targetCount) {
       const available = inventory.filter(t => t.remaining > 0);
       if (available.length === 0) break;
 
@@ -3475,6 +3515,7 @@
       }
 
       if (bestType === null || bestSet.length === 0) break;
+      if (bestSet.length < minGain) break;
 
       // Centroid refinement (respects flight paths and no-deploy)
       let cLat = 0, cLng = 0;
@@ -3526,7 +3567,16 @@
     const inventoryUsed = inventory.map(t => ({ name: t.name, used: t.total - t.remaining, total: t.total }));
     const remainingByType = {};
     for (const t of inventory) remainingByType[t.id] = t.remaining;
-    return { stations, covered, coveragePercent: 100 * numCovered / n, inventoryUsed, remainingByType };
+    return {
+      stations,
+      covered,
+      coveragePercent: 100 * numCovered / n,
+      inventoryUsed,
+      remainingByType,
+      targetCoveragePercent: planning.coverageTargetPct,
+      minIncidentsPerSite: minGain,
+      targetMet: numCovered >= targetCount
+    };
   }
 
   // ============ NO-FLY ZONE MANAGEMENT ============
@@ -4614,6 +4664,7 @@
 
       // ---- METRICS TILES ----
       const kpi = getKpiParams();
+      const planning = getPlanningParams();
       const totalUnits = stations.reduce((s, x) => s + (x.units || 1), 0);
       const totalShortfall = stations.reduce((s, x) => s + (x.shortfall || 0), 0);
       const kpiCompliance = overallKpiCompliance(stations, incidents.length) * 100;
@@ -4711,7 +4762,7 @@
         const t = (prioTargetsForPdf[cat.id] || 0) * 100;
         return `${cat.name.substring(0,8)} ${cat.kpiSec}s/${t.toFixed(0)}%`;
       }).join(' · ');
-      const profileLine = `Categories: ${targetsStr}   ·   Window: ${windowLabel}   ·   Service Time: ${kpi.serviceTimeMin}min   ·   Area: ${formatArea(areaKm2)}   ·   Incidents: ${incidents.length}   ·   No-Fly: ${noFlyZones.length}   ·   No-Deploy: ${noDeployZones.length}   ·   Water: ${waterZones.length}`;
+      const profileLine = `Categories: ${targetsStr} | Window: ${windowLabel} | Service Time: ${kpi.serviceTimeMin}min | Geo Target: ${planning.coverageTargetPct.toFixed(0)}% | Min/Site: ${planning.minIncidentsPerSite} | Area: ${formatArea(areaKm2)} | Incidents: ${incidents.length} | No-Fly: ${noFlyZones.length} | No-Deploy: ${noDeployZones.length} | Water: ${waterZones.length}`;
       pdf.text(profileLine, M, y);
       text(T.text);
       y += 4;
