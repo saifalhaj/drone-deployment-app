@@ -1269,8 +1269,8 @@
       renderHudSaturationChart(canvas, curve, opts);
       return;
     }
-    const dark = opts.dark !== false; // default dark
-    const palette = dark ? {
+    const useDarkPalette = opts.dark !== false; // default dark
+    const palette = useDarkPalette ? {
       bg: '#020609', grid: '#17242f', axis: '#54697a', text: '#dce6ef',
       muted: '#8ea4b7', bar: opts.barColor || '#9fb4c8', line: opts.lineColor || '#dce6ef'
     } : {
@@ -2690,14 +2690,14 @@
       return;
     }
     const filtered = getHeatmapFilteredIncidents();
-    const modeLabel = {
+    const heatmapModeLabel = {
       all: 'incident density',
       priority: 'priority-only demand',
       tod: 'time-of-day demand',
       type: 'incident type demand',
       month: 'monthly demand'
     }[heatmapMode] || 'incident density';
-    el.textContent = `${filtered.length} of ${incidents.length} incidents shown · ${modeLabel}`;
+    el.textContent = `${filtered.length} of ${incidents.length} incidents shown · ${heatmapModeLabel}`;
   }
 
   function refreshHeatmap() {
@@ -6009,8 +6009,8 @@
       document.getElementById('status2').textContent = `${incidents.length} incidents loaded`;
       document.getElementById('status2').classList.add('good');
       document.getElementById('optimizeBtn').disabled = false;
-      const dlGenBtn = document.getElementById('downloadGeneratedBtn');
-      if (dlGenBtn) dlGenBtn.disabled = false;
+      const generatedDownloadBtn = document.getElementById('downloadGeneratedBtn');
+      if (generatedDownloadBtn) generatedDownloadBtn.disabled = false;
       updateIncidentStats(window.__lastIncidentStatsMeta || null);
     }
     if (stations.length > 0) {
@@ -6622,15 +6622,15 @@
     }
 
     // Column mapping
-    const map = result.columnMap;
+    const columnMap = result.columnMap;
     const mappingEl = document.getElementById('uploadPreviewMapping');
     const mappings = [
-      ['Latitude',  map.latKey],
-      ['Longitude', map.lngKey],
-      ['Datetime',  map.dtKey],
-      ['Date',      map.dateKey],
-      ['Time',      map.timeKey],
-      ['Priority',  map.prioKey]
+      ['Latitude',  columnMap.latKey],
+      ['Longitude', columnMap.lngKey],
+      ['Datetime',  columnMap.dtKey],
+      ['Date',      columnMap.dateKey],
+      ['Time',      columnMap.timeKey],
+      ['Priority',  columnMap.prioKey]
     ];
     mappingEl.innerHTML = mappings.map(([logical, found]) => {
       const cls = found ? '' : 'missing';
