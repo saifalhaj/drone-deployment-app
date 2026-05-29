@@ -2663,7 +2663,29 @@
       realCount++;
     }
     const periodHours = getKpiParams().periodHours;
+    const hasGeneratedRelativeTimes = incidentSource === 'generate' &&
+      sourceIncidents.length > 0 &&
+      sourceIncidents.every(inc => Number.isFinite(Number(inc.t)));
     if (realCount === 0) {
+      if (hasGeneratedRelativeTimes) {
+        const relativeHourlyCounts = new Array(24).fill(1);
+        const relativeDayCounts = new Array(7).fill(1);
+        for (const inc of sourceIncidents) {
+          const relativeTime = Math.max(0, Number(inc.t) || 0);
+          relativeHourlyCounts[Math.floor(relativeTime) % 24]++;
+          relativeDayCounts[Math.floor(relativeTime / 24) % 7]++;
+        }
+        const relativeHourTotal = relativeHourlyCounts.reduce((sumValue, count) => sumValue + count, 0);
+        const relativeDayTotal = relativeDayCounts.reduce((sumValue, count) => sumValue + count, 0);
+        return {
+          hourlyWeights: relativeHourlyCounts.map(count => count / relativeHourTotal),
+          dayOfWeekWeights: relativeDayCounts.map(count => count / relativeDayTotal),
+          totalExpectedIncidents: sourceIncidents.length * (settings.growthMultiplier || 1),
+          observedPeriodHours: periodHours,
+          temporalModelQuality: 'relative-generated-profile',
+          warning: null
+        };
+      }
       return {
         hourlyWeights: new Array(24).fill(1 / 24),
         dayOfWeekWeights: new Array(7).fill(1 / 7),
@@ -2733,6 +2755,11 @@
       let timestamp = null;
       if (temporalProfile.temporalModelQuality === 'uniform-fallback') {
         t = rng() * Math.max(1, temporalProfile.observedPeriodHours || getKpiParams().periodHours);
+      } else if (temporalProfile.temporalModelQuality === 'relative-generated-profile') {
+        const day = sampleWeightedIndexFromArray(temporalProfile.dayOfWeekWeights, rng);
+        const hour = sampleWeightedIndexFromArray(temporalProfile.hourlyWeights, rng);
+        const minute = rng();
+        t = ((day * 24 + hour + minute) % Math.max(1, temporalProfile.observedPeriodHours || getKpiParams().periodHours));
       } else {
         const day = sampleWeightedIndexFromArray(temporalProfile.dayOfWeekWeights, rng);
         const hour = sampleWeightedIndexFromArray(temporalProfile.hourlyWeights, rng);
