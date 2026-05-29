@@ -532,6 +532,13 @@
  <label class="field-label">Random Seed</label>
  <input type="number" id="mcRandomSeed" placeholder="Optional">
  </div>
+ <div class="field">
+ <label class="field-label">Visualization</label>
+ <select id="mcVisualizationMode">
+ <option value="consensus-overlay">Consensus deployment</option>
+ <option value="probability-markers">Probability-weighted markers</option>
+ </select>
+ </div>
  </details>
  <div class="mc-progress" id="mcProgressPanel" style="display:none;">
  <div class="mc-progress-text" id="mcProgressText">Running Monte Carlo 0 / 30...</div>
@@ -585,7 +592,7 @@
  <label><input type="checkbox" checked> Coverage map <span>Stations, radii, and constraints</span></label>
  <label><input type="checkbox" checked> Deployment schedule <span>Site coordinates and unit counts</span></label>
  <label><input type="checkbox" checked> Assumptions & limits <span>Inputs used by the optimizer</span></label>
- <label><input type="checkbox"> Appendix JSON snapshot <span>Re-runnable mission data</span></label>
+ <label><input type="checkbox" id="appendixJsonSnapshot"> Appendix JSON snapshot <span>Re-runnable mission data</span></label>
  </div>
  <div class="subsection-label">HANDOFF</div>
  <div class="field-grid">

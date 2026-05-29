@@ -725,7 +725,11 @@
     const confidenceEl = document.getElementById('mcConfidenceLevel');
     const robustEl = document.getElementById('mcRobustCoreThreshold');
     const seedEl = document.getElementById('mcRandomSeed');
+    const visualizationEl = document.getElementById('mcVisualizationMode');
     const seedValue = parseInt(seedEl && seedEl.value, 10);
+    const visualizationMode = visualizationEl && visualizationEl.value === 'probability-markers'
+      ? 'probability-markers'
+      : 'consensus-overlay';
     return {
       ...state,
       runCount: Math.max(10, Math.min(100, Math.floor(parseFloat(runEl && runEl.value) || state.runCount || 30))),
@@ -734,7 +738,7 @@
       robustCoreThresholdPct: Math.max(50, Math.min(80, parseFloat(robustEl && robustEl.value) || state.robustCoreThresholdPct || 60)),
       randomSeed: Number.isFinite(seedValue) ? seedValue : null,
       maxRuntimeSec: 60,
-      visualizationMode: 'consensus-overlay'
+      visualizationMode
     };
   }
 
@@ -790,6 +794,7 @@
     setInputValue('mcConfidenceLevel', mc.confidenceLevel || 0.9);
     setInputValue('mcRobustCoreThreshold', mc.robustCoreThresholdPct == null ? 60 : mc.robustCoreThresholdPct);
     setInputValue('mcRandomSeed', mc.randomSeed);
+    setInputValue('mcVisualizationMode', mc.visualizationMode || 'consensus-overlay');
     const manual = document.getElementById('kdeBandwidthMeters');
     if (manual) manual.disabled = (sm.bandwidthMode || 'auto-silverman') !== 'manual';
     document.querySelectorAll('.mode-tab[data-planning-mode]').forEach(btn => {
@@ -807,11 +812,16 @@
         if (getSelectedPlanningMode() === PLANNING_MODE.SMOOTHED_GROWTH) clearRenderedDeployment();
       };
     });
-    ['mcRunCount', 'mcGrowthMultiplier', 'mcConfidenceLevel', 'mcRobustCoreThreshold', 'mcRandomSeed'].forEach(id => {
+    ['mcRunCount', 'mcGrowthMultiplier', 'mcConfidenceLevel', 'mcRobustCoreThreshold', 'mcRandomSeed', 'mcVisualizationMode'].forEach(id => {
       const el = document.getElementById(id);
       if (!el) return;
       el.onchange = function() {
         syncPlanningModeStateFromControls();
+        if (id === 'mcVisualizationMode' && monteCarloResult) {
+          renderMonteCarloVisualization({ mode: this.value });
+          renderMonteCarloHeadline(monteCarloResult);
+          return;
+        }
         if (getSelectedPlanningMode() === PLANNING_MODE.MONTE_CARLO) clearRenderedDeployment();
       };
     });
@@ -2854,6 +2864,125 @@
     }));
   }
 
+  function monteCarloAlternativeStations(result) {
+    if (!result || !result.stationAggregation) return [];
+    const thresholdPct = result.settings.robustCoreThresholdPct || 60;
+    return result.stationAggregation.bins
+      .filter(binInfo => binInfo.frequencyPct < thresholdPct)
+      .slice(0, 12)
+      .map((binInfo, idx) => ({
+        lat: binInfo.lat,
+        lng: binInfo.lng,
+        covered: binInfo.runHits,
+        incidentIdx: [],
+        radius: updateRadius(),
+        units: Math.max(1, Math.round(binInfo.meanUnits || 1)),
+        achievedServiceLevel: 1,
+        loadMetrics: { loadPct: binInfo.meanLoadPct || 0, queueRiskPct: 0, riskLevel: loadRiskLevel(binInfo.meanLoadPct || 0, 0) },
+        color: '#9fb4c8',
+        typeName: `Alternative ${idx + 1}`,
+        monteCarloFrequencyPct: binInfo.frequencyPct,
+        isMonteCarloAlternative: true
+      }));
+  }
+
+  function monteCarloPrimaryStations(result) {
+    if (!result) return [];
+    if (result.robustCoreStations && result.robustCoreStations.length) {
+      return result.robustCoreStations.map(siteItem => ({ ...siteItem, isMonteCarloPrimary: true }));
+    }
+    return ((result.stationAggregation && result.stationAggregation.bins.slice(0, 5)) || []).map((binInfo, idx) => ({
+      lat: binInfo.lat,
+      lng: binInfo.lng,
+      covered: binInfo.runHits,
+      incidentIdx: [],
+      radius: updateRadius(),
+      units: Math.max(1, Math.round(binInfo.meanUnits || 1)),
+      achievedServiceLevel: 1,
+      loadMetrics: { loadPct: binInfo.meanLoadPct || 0, queueRiskPct: 0, riskLevel: loadRiskLevel(binInfo.meanLoadPct || 0, 0) },
+      color: '#dce6ef',
+      typeName: `Top Frequency ${idx + 1}`,
+      monteCarloFrequencyPct: binInfo.frequencyPct,
+      isMonteCarloPrimary: true,
+      isMonteCarloFallbackPrimary: true
+    }));
+  }
+
+  function monteCarloRobustCoreLoadPct(result) {
+    if (!result || !result.stationAggregation || !result.stationAggregation.robustCore.length) return 0;
+    let weightedLoad = 0;
+    let totalUnits = 0;
+    for (const binInfo of result.stationAggregation.robustCore) {
+      const units = Math.max(1, binInfo.meanUnits || 1);
+      weightedLoad += (binInfo.meanLoadPct || 0) * units;
+      totalUnits += units;
+    }
+    return totalUnits > 0 ? weightedLoad / totalUnits : 0;
+  }
+
+  function monteCarloLoadContext(result) {
+    const loadPct = monteCarloRobustCoreLoadPct(result);
+    if (loadPct <= 100) return '';
+    return 'Robust-core load exceeds 100%; additional units beyond the robust core would reduce this load.';
+  }
+
+  function renderMonteCarloBinMarker(binInfo, idx, opts) {
+    opts = opts || {};
+    const frequency = Math.max(0, Math.min(100, binInfo.frequencyPct || 0));
+    const primary = !!opts.primary;
+    const probability = !!opts.probability;
+    const opacity = probability ? Math.max(0.22, frequency / 100) : primary ? 1 : Math.max(0.18, frequency / 140);
+    const size = probability ? Math.round(18 + frequency * 0.26) : primary ? 24 : 16;
+    const color = primary ? '#dce6ef' : '#9fb4c8';
+    const label = probability ? `${frequency.toFixed(0)}%` : primary ? String(idx + 1) : `${frequency.toFixed(0)}`;
+    const icon = L.divIcon({
+      html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:rgba(6,8,11,${Math.min(0.92, opacity + 0.18)});border:${primary ? 2 : 1.2}px solid ${color};box-shadow:0 0 ${primary ? 16 : 9}px ${color}${primary ? '88' : '55'};display:flex;align-items:center;justify-content:center;color:${color};font-family:'JetBrains Mono';font-size:${probability ? 9 : 8}px;font-weight:700;opacity:${opacity};">${label}</div>`,
+      className: '',
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2]
+    });
+    L.marker([binInfo.lat, binInfo.lng], { icon, opacity })
+      .bindTooltip(`${primary ? 'Robust core' : 'Alternative'} station frequency ${frequency.toFixed(0)}%`, { direction: 'top', offset: [0, -6] })
+      .addTo(stationLayer);
+  }
+
+  function renderMonteCarloVisualization(opts) {
+    opts = opts || {};
+    if (!monteCarloResult) return;
+    const viewMode = opts.viewMode || 'aggregate';
+    const displayMode = opts.mode || (planningModeState.monteCarlo && planningModeState.monteCarlo.visualizationMode) || 'consensus-overlay';
+    stationLayer.clearLayers();
+    coverageLayer.clearLayers();
+    selectedStationLayer.clearLayers();
+    selectedStationIndex = null;
+    if (viewMode === 'run' && opts.runRecord) {
+      stations = opts.runRecord.stations.map(siteItem => ({ ...siteItem, incidentIdx: Array.isArray(siteItem.incidentIdx) ? siteItem.incidentIdx.slice() : [] }));
+      if (opts.compareToConsensus) {
+        stations = stations.concat(monteCarloPrimaryStations(monteCarloResult).map(siteItem => ({
+          ...siteItem,
+          color: '#7CE8B4',
+          typeName: `${siteItem.typeName} (${siteItem.monteCarloFrequencyPct.toFixed(0)}%)`
+        })));
+      }
+      renderStations(stations);
+      return;
+    }
+    const robustBins = monteCarloResult.stationAggregation.robustCore;
+    const alternativeBins = monteCarloResult.stationAggregation.bins.filter(binInfo => binInfo.frequencyPct < (monteCarloResult.settings.robustCoreThresholdPct || 60)).slice(0, 12);
+    if (displayMode === 'probability-markers') {
+      stations = monteCarloPrimaryStations(monteCarloResult);
+      monteCarloResult.stationAggregation.bins.slice(0, 20).forEach((binInfo, idx) => {
+        renderMonteCarloBinMarker(binInfo, idx, { primary: binInfo.frequencyPct >= (monteCarloResult.settings.robustCoreThresholdPct || 60), probability: true });
+      });
+    } else {
+      stations = monteCarloPrimaryStations(monteCarloResult);
+      alternativeBins.forEach((binInfo, idx) => renderMonteCarloBinMarker(binInfo, idx, { primary: false }));
+      robustBins.forEach((binInfo, idx) => renderMonteCarloBinMarker(binInfo, idx, { primary: true }));
+    }
+    renderStationReportList();
+    renderStationDetail(null);
+  }
+
   function aggregateMonteCarlo(runRecords, demandGrid, settings, startedAtMs) {
     const summaries = runRecords.map(record => record.summary);
     const confidenceLevel = settings.confidenceLevel || 0.9;
@@ -2961,6 +3090,8 @@
     statusHtml += `<br>Median KPI: ${result.intervals.kpiPct.median.toFixed(1)}% | ${confidencePct}% KPI CI ${formatInterval(result.intervals.kpiPct)}%`;
     statusHtml += `<br>Station count CI ${formatInterval(result.intervals.stationCount, 0)} | Units CI ${formatInterval(result.intervals.unitCount, 0)} | Load CI ${formatInterval(result.intervals.loadPct)}%`;
     statusHtml += `<br>Aggregation bin: ${formatDistance(result.binMeters)} | temporal model: ${result.temporalProfile.temporalModelQuality}`;
+    const loadContext = monteCarloLoadContext(result);
+    if (loadContext) statusHtml += `<br><span style="color:var(--amber)">${escapeHtml(loadContext)}</span>`;
     if (result.warnings && result.warnings.length) statusHtml += `<br><span style="color:var(--incident)">${escapeHtml(result.warnings[0])}</span>`;
     const status = document.getElementById('status3');
     if (status) {
@@ -3048,16 +3179,8 @@
       };
     }
     incidents = syntheticIncidentsForRun(record).map(item => ({ ...item }));
-    stations = record.stations.map(siteItem => ({ ...siteItem, incidentIdx: Array.isArray(siteItem.incidentIdx) ? siteItem.incidentIdx.slice() : [] }));
-    if (compareToConsensus && monteCarloResult.robustCoreStations.length) {
-      stations = stations.concat(monteCarloResult.robustCoreStations.map(siteItem => ({
-        ...siteItem,
-        color: '#7CE8B4',
-        typeName: `${siteItem.typeName} (${siteItem.monteCarloFrequencyPct.toFixed(0)}%)`
-      })));
-    }
+    renderMonteCarloVisualization({ viewMode: 'run', runRecord: record, compareToConsensus });
     renderIncidents(coveredArrayFromStations());
-    renderStations(stations);
     renderStationReportList();
     renderStationDetail(null);
     const status = document.getElementById('status3');
@@ -3071,9 +3194,7 @@
   function returnToMonteCarloConsensus() {
     if (monteCarloInspectState) {
       incidents = monteCarloInspectState.incidents;
-      stations = monteCarloInspectState.stations;
       renderIncidents(monteCarloInspectState.coverage);
-      renderStations(stations);
       monteCarloInspectState = null;
     } else {
       stationLayer.clearLayers();
@@ -3083,6 +3204,7 @@
       renderIncidents(null);
     }
     if (monteCarloResult) {
+      renderMonteCarloVisualization();
       renderMonteCarloHeadline(monteCarloResult);
       renderMonteCarloDebugPanel();
     }
@@ -4304,12 +4426,9 @@
               runtimeMs: result.runtimeMs
             }
           };
-          stations = [];
           selectedStationIndex = null;
-          stationLayer.clearLayers();
-          coverageLayer.clearLayers();
-          selectedStationLayer.clearLayers();
           renderIncidents(null);
+          renderMonteCarloVisualization();
           renderMonteCarloHeadline(result);
           renderMonteCarloDebugPanel();
           setPanelState('panel3', 'done');
@@ -4568,6 +4687,7 @@
     const totalUnits = stations.reduce((s, x) => s + (x.units || 1), 0);
     const totalShortfall = stations.reduce((s, x) => s + (x.shortfall || 0), 0);
     const activeStep = parseInt((document.getElementById('app') && document.getElementById('app').dataset.step) || '1', 10) || 1;
+    const includeAppendixJson = !!(document.getElementById('appendixJsonSnapshot') && document.getElementById('appendixJsonSnapshot').checked);
     return {
       fileType: 'uasc-dfr-plan',
       version: SAVED_PLAN_VERSION,
@@ -4598,13 +4718,30 @@
         max_weight: lastDemandGrid.maxWeight
       } : null,
       monte_carlo: monteCarloResult ? {
-        settings: monteCarloResult.settings,
-        runtime_ms: monteCarloResult.runtimeMs,
-        bin_meters: monteCarloResult.binMeters,
-        robust_core_count: monteCarloResult.stationAggregation.robustCore.length,
-        retained_run_ids: monteCarloResult.retainedRunIds,
-        intervals: monteCarloResult.intervals,
-        summaries: monteCarloResult.summaries
+        result_meta: {
+          mode: monteCarloResult.mode,
+          settings: monteCarloResult.settings,
+          runtime_ms: monteCarloResult.runtimeMs,
+          bin_meters: monteCarloResult.binMeters,
+          robust_core_count: monteCarloResult.stationAggregation.robustCore.length,
+          robust_core_load_pct: monteCarloRobustCoreLoadPct(monteCarloResult),
+          retained_run_ids: monteCarloResult.retainedRunIds,
+          intervals: monteCarloResult.intervals,
+          station_frequency_bins: monteCarloResult.stationAggregation.bins.map(binInfo => ({
+            frequency_pct: binInfo.frequencyPct,
+            lat: binInfo.lat,
+            lng: binInfo.lng,
+            mean_units: binInfo.meanUnits,
+            mean_load_pct: binInfo.meanLoadPct,
+            run_hits: binInfo.runHits
+          })),
+          summaries: monteCarloResult.summaries
+        },
+        run_details: includeAppendixJson ? monteCarloResult.runRecords.map(record => ({
+          summary: record.summary,
+          stations: record.stations,
+          syntheticIncidents: record.syntheticIncidents || null
+        })) : null
       } : null,
       ui: {
         step: activeStep,
@@ -6174,6 +6311,36 @@
       ctx.fill();
     }
 
+    if (monteCarloResult && getSelectedPlanningMode() === PLANNING_MODE.MONTE_CARLO) {
+      const thresholdPct = monteCarloResult.settings.robustCoreThresholdPct || 60;
+      const markerMode = (planningModeState.monteCarlo && planningModeState.monteCarlo.visualizationMode) || 'consensus-overlay';
+      const binsForPdf = markerMode === 'probability-markers'
+        ? monteCarloResult.stationAggregation.bins.slice(0, 20)
+        : monteCarloResult.stationAggregation.bins.filter(binInfo => binInfo.frequencyPct < thresholdPct).slice(0, 12);
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (const binInfo of binsForPdf) {
+        const p = ll2px({ lat: binInfo.lat, lng: binInfo.lng });
+        const frequency = Math.max(0, Math.min(100, binInfo.frequencyPct || 0));
+        const isCore = frequency >= thresholdPct;
+        if (markerMode !== 'probability-markers' && isCore) continue;
+        const markerRadius = markerMode === 'probability-markers' ? 8 + frequency * 0.09 : 7;
+        ctx.globalAlpha = markerMode === 'probability-markers' ? Math.max(0.25, frequency / 100) : Math.max(0.18, frequency / 140);
+        ctx.fillStyle = '#06080B';
+        ctx.strokeStyle = isCore ? '#dce6ef' : '#9fb4c8';
+        ctx.lineWidth = isCore ? 2 : 1.2;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, markerRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = isCore ? '#dce6ef' : '#9fb4c8';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.fillText(String(Math.round(frequency)), p.x, p.y + 0.5);
+      }
+      ctx.restore();
+    }
+
     // 3g. Station markers (drawn last so they sit on top of everything else).
     // Match the on-screen style: orange disc with dark outline, count label inside.
     for (let i = 0; i < stations.length; i++) {
@@ -6200,6 +6367,101 @@
   }
 
   // ============ PDF REPORT GENERATION ============
+  function addMonteCarloSensitivityPage(pdfDoc, palette, margin, contentWidth, pageHeight) {
+    function pageFill(color) { pdfDoc.setFillColor(color[0], color[1], color[2]); }
+    function pageStroke(color) { pdfDoc.setDrawColor(color[0], color[1], color[2]); }
+    function pageText(color) { pdfDoc.setTextColor(color[0], color[1], color[2]); }
+    if (!monteCarloResult) return;
+
+    pdfDoc.addPage();
+    pageFill(palette.bg);
+    pdfDoc.rect(0, 0, 210, pageHeight, 'F');
+    pdfDoc.setFont('helvetica', 'bold');
+    pdfDoc.setFontSize(14);
+    pageText(palette.text);
+    pdfDoc.text('Sensitivity Analysis', margin, 18);
+    pdfDoc.setFont('helvetica', 'normal');
+    pdfDoc.setFontSize(8);
+    pageText(palette.muted);
+    pdfDoc.text(`Monte Carlo ${monteCarloResult.summaries.length} runs | Growth +${Math.round(((monteCarloResult.settings.growthMultiplier || 1) - 1) * 100)}% | Robust core threshold ${monteCarloResult.settings.robustCoreThresholdPct}%`, margin, 24);
+    pageStroke(palette.border);
+    pdfDoc.line(margin, 28, margin + contentWidth, 28);
+
+    let rowY = 36;
+    const confidencePct = Math.round((monteCarloResult.settings.confidenceLevel || 0.9) * 100);
+    const metricRows = [
+      ['KPI Compliance', formatInterval(monteCarloResult.intervals.kpiPct) + '%', monteCarloResult.intervals.kpiPct.median.toFixed(1) + '%'],
+      ['Station Count', formatInterval(monteCarloResult.intervals.stationCount, 0), monteCarloResult.intervals.stationCount.median.toFixed(0)],
+      ['Unit Count', formatInterval(monteCarloResult.intervals.unitCount, 0), monteCarloResult.intervals.unitCount.median.toFixed(0)],
+      ['Load', formatInterval(monteCarloResult.intervals.loadPct) + '%', monteCarloResult.intervals.loadPct.median.toFixed(1) + '%'],
+      ['Robust Core Load', monteCarloRobustCoreLoadPct(monteCarloResult).toFixed(1) + '%', `${monteCarloResult.stationAggregation.robustCore.length} core bins`]
+    ];
+    pageFill(palette.surface2);
+    pdfDoc.rect(margin, rowY, contentWidth, 7, 'F');
+    pdfDoc.setFont('helvetica', 'bold');
+    pdfDoc.setFontSize(7.5);
+    pageText(palette.muted);
+    pdfDoc.text('Metric', margin + 2, rowY + 4.8);
+    pdfDoc.text(`${confidencePct}% CI`, margin + 62, rowY + 4.8);
+    pdfDoc.text('Median / Context', margin + 120, rowY + 4.8);
+    rowY += 7;
+    pdfDoc.setFont('helvetica', 'normal');
+    for (const metricRow of metricRows) {
+      pageFill(metricRows.indexOf(metricRow) % 2 === 0 ? palette.surface1 : palette.bg);
+      pdfDoc.rect(margin, rowY, contentWidth, 7, 'F');
+      pageText(palette.text);
+      pdfDoc.text(metricRow[0], margin + 2, rowY + 4.8);
+      pageText(metricRow[0] === 'Robust Core Load' && monteCarloRobustCoreLoadPct(monteCarloResult) > 100 ? palette.amber : palette.text);
+      pdfDoc.text(metricRow[1], margin + 62, rowY + 4.8);
+      pageText(palette.muted);
+      pdfDoc.text(metricRow[2], margin + 120, rowY + 4.8);
+      rowY += 7;
+    }
+
+    rowY += 8;
+    pdfDoc.setFont('helvetica', 'bold');
+    pdfDoc.setFontSize(9);
+    pageText(palette.text);
+    pdfDoc.text('Station-Frequency Table', margin, rowY);
+    rowY += 4;
+    pageFill(palette.surface2);
+    pdfDoc.rect(margin, rowY, contentWidth, 7, 'F');
+    pdfDoc.setFontSize(7);
+    pageText(palette.muted);
+    pdfDoc.text('Rank', margin + 2, rowY + 4.8);
+    pdfDoc.text('Frequency', margin + 18, rowY + 4.8);
+    pdfDoc.text('Mean Units', margin + 48, rowY + 4.8);
+    pdfDoc.text('Mean Load', margin + 78, rowY + 4.8);
+    pdfDoc.text('Coordinates', margin + 108, rowY + 4.8);
+    rowY += 7;
+    pdfDoc.setFont('helvetica', 'normal');
+    const frequencyRows = monteCarloResult.stationAggregation.bins.slice(0, 14);
+    frequencyRows.forEach((binInfo, idx) => {
+      if (rowY > 250) return;
+      pageFill(idx % 2 === 0 ? palette.surface1 : palette.bg);
+      pdfDoc.rect(margin, rowY, contentWidth, 7, 'F');
+      pageText(binInfo.frequencyPct >= (monteCarloResult.settings.robustCoreThresholdPct || 60) ? palette.text : palette.muted);
+      pdfDoc.text(String(idx + 1), margin + 2, rowY + 4.8);
+      pdfDoc.text(binInfo.frequencyPct.toFixed(0) + '%', margin + 18, rowY + 4.8);
+      pdfDoc.text((binInfo.meanUnits || 0).toFixed(1), margin + 48, rowY + 4.8);
+      pageText((binInfo.meanLoadPct || 0) > 100 ? palette.amber : palette.text);
+      pdfDoc.text((binInfo.meanLoadPct || 0).toFixed(0) + '%', margin + 78, rowY + 4.8);
+      pageText(palette.muted);
+      pdfDoc.text(formatCoordinate(binInfo.lat, binInfo.lng), margin + 108, rowY + 4.8);
+      rowY += 7;
+    });
+
+    rowY += 8;
+    pdfDoc.setFontSize(8);
+    pageText(palette.muted);
+    const explanation = `Aggregation bin size is ${formatDistance(monteCarloResult.binMeters)}. Temporal model quality is ${monteCarloResult.temporalProfile.temporalModelQuality}. Robust core sites are bins appearing in at least ${monteCarloResult.settings.robustCoreThresholdPct}% of runs. Load over 100% means the robust-core deployment is overloaded; adding units or selecting lower-frequency alternatives can reduce load.`;
+    pdfDoc.text(pdfDoc.splitTextToSize(explanation, contentWidth), margin, rowY);
+    pdfDoc.setFontSize(6.5);
+    pdfDoc.setFont('helvetica', 'italic');
+    pageText(palette.muted);
+    pdfDoc.text('UASC · Confidential · Page 2 of 2', margin + contentWidth - 50, 292);
+  }
+
   async function generatePDFReport() {
     if (incidents.length === 0 || stations.length === 0) {
       alert('Generate incidents and compute a deployment before exporting the report.');
@@ -6331,10 +6593,22 @@
       const tilesY = 28;
       const tileH = 18;
       const prio = compliancePerPriority(stations, incidents);
+      const isMonteCarloPdf = getSelectedPlanningMode() === PLANNING_MODE.MONTE_CARLO && !!monteCarloResult;
+      const mcConfidencePct = isMonteCarloPdf ? Math.round((monteCarloResult.settings.confidenceLevel || 0.9) * 100) : 90;
+      const mcRobustCoreCount = isMonteCarloPdf ? monteCarloResult.stationAggregation.robustCore.length : 0;
+      const mcMedianUnits = isMonteCarloPdf ? monteCarloResult.intervals.unitCount.median : totalUnits;
+      const mcMedianKpi = isMonteCarloPdf ? monteCarloResult.intervals.kpiPct.median : kpiCompliance;
+      const mcKpiCi = isMonteCarloPdf ? formatInterval(monteCarloResult.intervals.kpiPct) + '%' : '';
+      const mcRobustCoreLoad = isMonteCarloPdf ? monteCarloRobustCoreLoadPct(monteCarloResult) : networkLoad.loadPct;
 
       // First row: high-level summary (4 tiles)
       const tileW = W / 4;
-      const tiles = [
+      const tiles = isMonteCarloPdf ? [
+        { label: 'Robust Core Sites', value: String(mcRobustCoreCount), accent: false },
+        { label: 'Median Units', value: String(Math.round(mcMedianUnits)), accent: true },
+        { label: `KPI ${mcConfidencePct}% CI`, value: mcKpiCi, accent: false },
+        { label: 'Median KPI', value: mcMedianKpi.toFixed(1) + '%', accent: false }
+      ] : [
         { label: 'Sites', value: String(stations.length), accent: false },
         { label: 'DroneBox Units', value: String(totalUnits), accent: true },
         { label: 'Geographic Cov.', value: geoCov.toFixed(1) + '%', accent: false },
@@ -6359,7 +6633,7 @@
       const prioRowY = tilesY + tileH + 2;
       const prioRowH = 14;
       const prioTargetsForPdf = getPriorityTargets();
-      const tileCats = incidentCategories
+      const tileCats = isMonteCarloPdf ? [] : incidentCategories
         .filter(cat => (prio.totals[cat.id] || 0) > 0)
         .slice(0, 4);
       const numTiles = Math.max(1, tileCats.length);
@@ -6420,10 +6694,18 @@
         modeBits.push(`KDE ${lastPlanningResultMeta.demandGrid.resolution}x${lastPlanningResultMeta.demandGrid.resolution}`);
         modeBits.push(`BW ${formatDistance(lastPlanningResultMeta.demandGrid.bandwidthMeters)}`);
       }
-      const profileLine = `Mode: ${modeBits.join(' / ')} | Categories: ${targetsStr} | Window: ${windowLabel} | Service Time: ${kpi.serviceTimeMin}min | Load: ${networkLoad.loadPct.toFixed(0)}% | Queue: ${networkLoad.queueRiskPct.toFixed(0)}% | Geo Target: ${planning.coverageTargetPct.toFixed(0)}% | Min/Site: ${planning.minIncidentsPerSite} | Area: ${formatArea(areaKm2)} | Incidents: ${incidents.length} | No-Fly: ${noFlyZones.length} | No-Deploy: ${noDeployZones.length} | Water: ${waterZones.length}`;
+      const profileLoadLabel = isMonteCarloPdf ? `Robust Core Load: ${mcRobustCoreLoad.toFixed(0)}%` : `Load: ${networkLoad.loadPct.toFixed(0)}%`;
+      const profileLine = `Mode: ${modeBits.join(' / ')} | Categories: ${targetsStr} | Window: ${windowLabel} | Service Time: ${kpi.serviceTimeMin}min | ${profileLoadLabel} | Queue: ${networkLoad.queueRiskPct.toFixed(0)}% | Geo Target: ${planning.coverageTargetPct.toFixed(0)}% | Min/Site: ${planning.minIncidentsPerSite} | Area: ${formatArea(areaKm2)} | Incidents: ${incidents.length} | No-Fly: ${noFlyZones.length} | No-Deploy: ${noDeployZones.length} | Water: ${waterZones.length}`;
       pdf.text(profileLine, M, y);
       text(T.text);
       y += 4;
+      if (isMonteCarloPdf && mcRobustCoreLoad > 100) {
+        pdf.setFontSize(7);
+        text(T.amber);
+        pdf.text('Robust-core load exceeds 100%; additional units beyond the robust core would reduce this load.', M, y);
+        text(T.text);
+        y += 4;
+      }
 
       // ---- MAP IMAGE ----
       // Fix for skew: if the captured aspect ratio doesn't fit the target width
@@ -6462,7 +6744,12 @@
       if (noFlyZones.length > 0) legendItems.push({ kind: 'fill', color: '#FF6B7E', label: 'No-Fly' });
       if (noDeployZones.length > 0) legendItems.push({ kind: 'fill', color: '#E8A744', label: 'No-Deploy' });
       if (waterZones.length > 0) legendItems.push({ kind: 'fill', color: '#7CDCE8', label: 'Water' });
-      legendItems.push({ kind: 'station', color: '#7CDCE8', label: 'Station' });
+      if (isMonteCarloPdf) {
+        legendItems.push({ kind: 'station', color: '#dce6ef', label: 'Robust Core' });
+        legendItems.push({ kind: 'dot', color: '#9fb4c8', label: 'Alternative/Frequency' });
+      } else {
+        legendItems.push({ kind: 'station', color: '#7CDCE8', label: 'Station' });
+      }
       for (const cat of incidentCategories) {
         legendItems.push({ kind: 'dot', color: cat.color, label: cat.name });
       }
@@ -6503,8 +6790,24 @@
       const chartH = 38;
       const chartGap = 3;
       const chartW = (W - chartGap) / 2;
-      pdf.addImage(chartCovDataUrl, 'PNG', M, y, chartW, chartH);
-      pdf.addImage(chartKpiDataUrl, 'PNG', M + chartW + chartGap, y, chartW, chartH);
+      if (isMonteCarloPdf) {
+        fill(T.surface1);
+        stroke(T.border);
+        pdf.rect(M, y, W, chartH, 'FD');
+        pdf.setFontSize(8);
+        pdf.setFont('helvetica', 'bold');
+        text(T.text);
+        pdf.text('Monte Carlo Leadership Summary', M + 3, y + 6);
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(7.5);
+        text(T.muted);
+        pdf.text(`Runs: ${monteCarloResult.summaries.length} | Growth: +${Math.round(((monteCarloResult.settings.growthMultiplier || 1) - 1) * 100)}% | Bin: ${formatDistance(monteCarloResult.binMeters)} | Temporal: ${monteCarloResult.temporalProfile.temporalModelQuality}`, M + 3, y + 13);
+        pdf.text(`Station CI: ${formatInterval(monteCarloResult.intervals.stationCount, 0)} | Unit CI: ${formatInterval(monteCarloResult.intervals.unitCount, 0)} | Load CI: ${formatInterval(monteCarloResult.intervals.loadPct)}%`, M + 3, y + 20);
+        pdf.text(`Robust core stations appear in at least ${monteCarloResult.settings.robustCoreThresholdPct}% of runs; faint alternatives are lower-frequency bins.`, M + 3, y + 27);
+      } else {
+        pdf.addImage(chartCovDataUrl, 'PNG', M, y, chartW, chartH);
+        pdf.addImage(chartKpiDataUrl, 'PNG', M + chartW + chartGap, y, chartW, chartH);
+      }
       y += chartH + 3;
 
       // ---- SITE TABLE ----
@@ -6601,7 +6904,11 @@
         ? 'Capacity sizing computed via greedy maximum-coverage with time-aware simulation. Each site sized to meet per-category KPI targets.'
         : 'Heterogeneous allocation from declared inventory. Shortfalls indicate clusters requiring additional units to meet KPI.';
       pdf.text(footerNote, M, 292);
-      pdf.text('UASC · Confidential · Page 1 of 1', M + W - 50, 292);
+      pdf.text(isMonteCarloPdf ? 'UASC · Confidential · Page 1 of 2' : 'UASC · Confidential · Page 1 of 1', M + W - 50, 292);
+
+      if (isMonteCarloPdf) {
+        addMonteCarloSensitivityPage(pdf, T, M, W, PAGE_H);
+      }
 
       pdf.save(`UASC_DFR_Plan_${new Date().toISOString().slice(0,10)}.pdf`);
       setFooter('PDF saved');
