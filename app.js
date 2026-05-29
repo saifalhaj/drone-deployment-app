@@ -109,6 +109,9 @@
   let lastDemandGrid = null;
   let lastPlanningResultMeta = null;
   let modeResultCache = {};
+  let monteCarloController = null;
+  let monteCarloResult = null;
+  let monteCarloInspectState = null;
 
   // ============ PLANNING MODE SCAFFOLD ============
   const SAVED_PLAN_VERSION = 2;
@@ -714,6 +717,27 @@
     };
   }
 
+  function getMonteCarloSettings() {
+    const defaults = createDefaultPlanningModeState().monteCarlo;
+    const state = { ...defaults, ...(planningModeState.monteCarlo || {}) };
+    const runEl = document.getElementById('mcRunCount');
+    const growthEl = document.getElementById('mcGrowthMultiplier');
+    const confidenceEl = document.getElementById('mcConfidenceLevel');
+    const robustEl = document.getElementById('mcRobustCoreThreshold');
+    const seedEl = document.getElementById('mcRandomSeed');
+    const seedValue = parseInt(seedEl && seedEl.value, 10);
+    return {
+      ...state,
+      runCount: Math.max(10, Math.min(100, Math.floor(parseFloat(runEl && runEl.value) || state.runCount || 30))),
+      growthMultiplier: Math.max(1, parseFloat(growthEl && growthEl.value) || state.growthMultiplier || 1),
+      confidenceLevel: Math.max(0.5, Math.min(0.99, parseFloat(confidenceEl && confidenceEl.value) || state.confidenceLevel || 0.9)),
+      robustCoreThresholdPct: Math.max(50, Math.min(80, parseFloat(robustEl && robustEl.value) || state.robustCoreThresholdPct || 60)),
+      randomSeed: Number.isFinite(seedValue) ? seedValue : null,
+      maxRuntimeSec: 60,
+      visualizationMode: 'consensus-overlay'
+    };
+  }
+
   function syncPlanningModeStateFromControls() {
     const planning = getPlanningParams();
     planningModeState = mergePlanningModeState({
@@ -724,13 +748,14 @@
         coverageTargetPct: planning.coverageTargetPct,
         minIncidentsPerSite: planning.minIncidentsPerSite
       },
-      smoothedGrowth: getSmoothedGrowthSettings()
+      smoothedGrowth: getSmoothedGrowthSettings(),
+      monteCarlo: getMonteCarloSettings()
     });
   }
 
   function setPlanningMode(mode, opts) {
     opts = opts || {};
-    if (!Object.values(PLANNING_MODE).includes(mode) || mode === PLANNING_MODE.MONTE_CARLO) mode = PLANNING_MODE.SMOOTHED_GROWTH;
+    if (!Object.values(PLANNING_MODE).includes(mode)) mode = PLANNING_MODE.SMOOTHED_GROWTH;
     const previous = planningModeState.mode;
     if (previous === mode && !opts.force) return;
     if (!opts.silent) cacheCurrentPlanningResult();
@@ -739,8 +764,10 @@
       btn.classList.toggle('active', btn.dataset.planningMode === mode);
     });
     const smoothedPanel = document.getElementById('smoothedGrowthPanel');
+    const monteCarloPanel = document.getElementById('monteCarloPanel');
     const warning = document.getElementById('directFitWarning');
     if (smoothedPanel) smoothedPanel.style.display = mode === PLANNING_MODE.SMOOTHED_GROWTH ? 'block' : 'none';
+    if (monteCarloPanel) monteCarloPanel.style.display = mode === PLANNING_MODE.MONTE_CARLO ? 'block' : 'none';
     if (warning) warning.style.display = mode === PLANNING_MODE.DIRECT_FIT ? 'block' : 'none';
     if (!opts.silent && previous !== mode) {
       if (!restorePlanningResult(mode)) clearRenderedDeployment();
@@ -752,11 +779,17 @@
     const state = mergePlanningModeState(planningModeState);
     planningModeState = state;
     const sm = state.smoothedGrowth || {};
+    const mc = state.monteCarlo || {};
     setInputValue('growthMultiplier', sm.growthMultiplier || 1);
     setInputValue('kdeBandwidthMode', sm.bandwidthMode || 'auto-silverman');
     setInputValue('kdeBandwidthMeters', sm.bandwidthMeters || 1000);
     setInputValue('kdeGridResolution', sm.gridResolution || 100);
     setInputValue('kdeDemandThreshold', sm.demandThresholdPct == null ? 1 : sm.demandThresholdPct);
+    setInputValue('mcRunCount', mc.runCount || 30);
+    setInputValue('mcGrowthMultiplier', mc.growthMultiplier || 1);
+    setInputValue('mcConfidenceLevel', mc.confidenceLevel || 0.9);
+    setInputValue('mcRobustCoreThreshold', mc.robustCoreThresholdPct == null ? 60 : mc.robustCoreThresholdPct);
+    setInputValue('mcRandomSeed', mc.randomSeed);
     const manual = document.getElementById('kdeBandwidthMeters');
     if (manual) manual.disabled = (sm.bandwidthMode || 'auto-silverman') !== 'manual';
     document.querySelectorAll('.mode-tab[data-planning-mode]').forEach(btn => {
@@ -774,6 +807,15 @@
         if (getSelectedPlanningMode() === PLANNING_MODE.SMOOTHED_GROWTH) clearRenderedDeployment();
       };
     });
+    ['mcRunCount', 'mcGrowthMultiplier', 'mcConfidenceLevel', 'mcRobustCoreThreshold', 'mcRandomSeed'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.onchange = function() {
+        syncPlanningModeStateFromControls();
+        if (getSelectedPlanningMode() === PLANNING_MODE.MONTE_CARLO) clearRenderedDeployment();
+      };
+    });
+    wireMonteCarloDebugControls();
     setPlanningMode(state.mode, { silent: true, force: true });
   }
 
@@ -2554,6 +2596,534 @@
     return result && result.traceIncidents && result.traceIncidents.length ? result.traceIncidents : incidents;
   }
 
+  function createSeededRng(seed) {
+    let state = (Number(seed) >>> 0) || 0x6d2b79f5;
+    return function seededRandom() {
+      state += 0x6d2b79f5;
+      let next = state;
+      next = Math.imul(next ^ (next >>> 15), next | 1);
+      next ^= next + Math.imul(next ^ (next >>> 7), next | 61);
+      return ((next ^ (next >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function gaussianWithRng(rng) {
+    const u = Math.max(1e-9, rng());
+    const v = rng();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+
+  function poissonSample(lambda, rng) {
+    if (lambda <= 0) return 0;
+    if (lambda < 50) {
+      const limit = Math.exp(-lambda);
+      let count = 0;
+      let product = 1;
+      do {
+        count++;
+        product *= rng();
+      } while (product > limit);
+      return count - 1;
+    }
+    return Math.round(Math.max(0, lambda + gaussianWithRng(rng) * Math.sqrt(lambda)));
+  }
+
+  function sampleWeightedIndexFromArray(weights, rng) {
+    let total = 0;
+    for (const value of weights) total += Math.max(0, Number(value) || 0);
+    if (total <= 0) return Math.floor(rng() * weights.length);
+    let draw = rng() * total;
+    for (let i = 0; i < weights.length; i++) {
+      draw -= Math.max(0, Number(weights[i]) || 0);
+      if (draw <= 0) return i;
+    }
+    return weights.length - 1;
+  }
+
+  function fitTemporalProfile(sourceIncidents, settings) {
+    const hourlyCounts = new Array(24).fill(0);
+    const dayCounts = new Array(7).fill(0);
+    let realCount = 0;
+    for (const inc of sourceIncidents) {
+      if (!inc.timestamp) continue;
+      const parsedDate = new Date(inc.timestamp);
+      if (Number.isNaN(parsedDate.getTime())) continue;
+      hourlyCounts[parsedDate.getHours()]++;
+      dayCounts[parsedDate.getDay()]++;
+      realCount++;
+    }
+    const periodHours = getKpiParams().periodHours;
+    if (realCount === 0) {
+      return {
+        hourlyWeights: new Array(24).fill(1 / 24),
+        dayOfWeekWeights: new Array(7).fill(1 / 7),
+        totalExpectedIncidents: sourceIncidents.length * (settings.growthMultiplier || 1),
+        observedPeriodHours: periodHours,
+        temporalModelQuality: 'uniform-fallback',
+        warning: 'This incident file does not include absolute dates/times. Monte Carlo will model spatial uncertainty and total volume, but it will not model hour-of-day or day-of-week temporal patterns. Synthetic incident times will be sampled uniformly across the selected time window.'
+      };
+    }
+    return {
+      hourlyWeights: hourlyCounts.map(count => (count + 1) / (realCount + 24)),
+      dayOfWeekWeights: dayCounts.map(count => (count + 1) / (realCount + 7)),
+      totalExpectedIncidents: sourceIncidents.length * (settings.growthMultiplier || 1),
+      observedPeriodHours: periodHours,
+      temporalModelQuality: 'fitted-hour-dow',
+      warning: null
+    };
+  }
+
+  function buildSpatialSampler(demandGrid) {
+    const cells = demandGrid.activeCells || [];
+    const cumulative = [];
+    let running = 0;
+    for (const cell of cells) {
+      running += Number(cell.normalizedWeight) || 0;
+      cumulative.push(running);
+    }
+    if (running > 0 && Math.abs(running - 1) > 0.001) {
+      for (let i = 0; i < cumulative.length; i++) cumulative[i] /= running;
+    }
+    return { cells, cumulative };
+  }
+
+  function pickSpatialCell(spatialSampler, rng) {
+    const draw = rng();
+    const cumulative = spatialSampler.cumulative;
+    let lo = 0;
+    let hi = cumulative.length - 1;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (draw <= cumulative[mid]) hi = mid;
+      else lo = mid + 1;
+    }
+    return spatialSampler.cells[lo] || spatialSampler.cells[0];
+  }
+
+  function categoryFromCell(cell, rng) {
+    const weights = incidentCategories.map(cat => (cell.categoryWeights && cell.categoryWeights[cat.id]) || 0);
+    const idx = sampleWeightedIndexFromArray(weights, rng);
+    return incidentCategories[idx] ? incidentCategories[idx].id : getDefaultCategoryId();
+  }
+
+  function sampleSyntheticFuture(spatialSampler, demandGrid, temporalProfile, settings, seed) {
+    const rng = createSeededRng(seed);
+    const count = poissonSample(temporalProfile.totalExpectedIncidents, rng);
+    const synthetic = [];
+    let attempts = 0;
+    while (synthetic.length < count && attempts < count * 20 + 100) {
+      attempts++;
+      const cell = pickSpatialCell(spatialSampler, rng);
+      if (!cell) break;
+      const lat = cell.lat + (rng() - 0.5) * demandGrid.latStep;
+      const lng = cell.lng + (rng() - 0.5) * demandGrid.lngStep;
+      const point = { lat, lng };
+      if (!isValidLocation(point) || isInNoFlyZone(point)) continue;
+      let t;
+      let timestamp = null;
+      if (temporalProfile.temporalModelQuality === 'uniform-fallback') {
+        t = rng() * Math.max(1, temporalProfile.observedPeriodHours || getKpiParams().periodHours);
+      } else {
+        const day = sampleWeightedIndexFromArray(temporalProfile.dayOfWeekWeights, rng);
+        const hour = sampleWeightedIndexFromArray(temporalProfile.hourlyWeights, rng);
+        const minute = rng();
+        t = ((day * 24 + hour + minute) % Math.max(1, temporalProfile.observedPeriodHours || getKpiParams().periodHours));
+        timestamp = new Date(Date.UTC(2026, 0, 4 + day, hour, Math.floor(minute * 60), 0)).toISOString();
+      }
+      synthetic.push({
+        lat,
+        lng,
+        t,
+        timestamp,
+        priority: categoryFromCell(cell, rng),
+        source: 'monte-carlo',
+        cellId: cell.id
+      });
+    }
+    return synthetic;
+  }
+
+  function runOptimizerForSyntheticFuture(syntheticIncidents, planning) {
+    const result = optMode === 'fleet'
+      ? greedyHeterogeneous(syntheticIncidents, fleetTypes, planning)
+      : greedyMaxCoverage(syntheticIncidents, updateRadius(), planning);
+    const kpi = getKpiParams();
+    const remainingByType = optMode === 'fleet' ? (result.remainingByType || {}) : null;
+    applyConcurrency(result.stations, kpi, remainingByType, syntheticIncidents);
+    return result;
+  }
+
+  function summarizeMonteCarloRun(runNumber, seed, syntheticIncidents, result, runtimeMs, warnings) {
+    const runStations = result.stations || [];
+    const unitCount = runStations.reduce((sumValue, siteItem) => sumValue + (siteItem.units || 1), 0);
+    const runLoad = buildNetworkLoadSummary(runStations);
+    const kpiPct = 100 * overallKpiCompliance(runStations, syntheticIncidents.length);
+    return {
+      runNumber,
+      runId: `MC-${String(runNumber).padStart(3, '0')}`,
+      seed,
+      incidentCount: syntheticIncidents.length,
+      stationCount: runStations.length,
+      unitCount,
+      kpiPct,
+      loadPct: runLoad.loadPct,
+      queueRiskPct: runLoad.queueRiskPct,
+      runtimeMs,
+      warnings: warnings || [],
+      medianDistanceScore: 0
+    };
+  }
+
+  function percentileFromValues(values, fraction) {
+    if (!values.length) return 0;
+    const sortedValues = values.slice().sort((a, b) => a - b);
+    const pos = Math.min(sortedValues.length - 1, Math.max(0, fraction * (sortedValues.length - 1)));
+    const lower = Math.floor(pos);
+    const upper = Math.ceil(pos);
+    if (lower === upper) return sortedValues[lower];
+    return sortedValues[lower] + (sortedValues[upper] - sortedValues[lower]) * (pos - lower);
+  }
+
+  function confidenceInterval(values, confidenceLevel) {
+    const alpha = (1 - confidenceLevel) / 2;
+    return {
+      low: percentileFromValues(values, alpha),
+      median: percentileFromValues(values, 0.5),
+      high: percentileFromValues(values, 1 - alpha)
+    };
+  }
+
+  function aggregateStationBins(runRecords, binMeters, thresholdPct) {
+    const binsByKey = new Map();
+    const baseLat = areaPolygon ? areaPolygon.getBounds().getCenter().lat : (incidents[0] ? incidents[0].lat : 0);
+    const scale = metersPerDegreeAt(baseLat);
+    for (const record of runRecords) {
+      const seenKeys = new Set();
+      for (const siteItem of record.stations) {
+        const x = Math.round((siteItem.lng * scale.lng) / binMeters);
+        const y = Math.round((siteItem.lat * scale.lat) / binMeters);
+        const key = `${x}:${y}`;
+        if (!binsByKey.has(key)) {
+          binsByKey.set(key, {
+            key,
+            stationHits: 0,
+            runHits: 0,
+            latSum: 0,
+            lngSum: 0,
+            unitSum: 0,
+            loadSum: 0
+          });
+        }
+        const binInfo = binsByKey.get(key);
+        binInfo.stationHits++;
+        binInfo.latSum += siteItem.lat;
+        binInfo.lngSum += siteItem.lng;
+        binInfo.unitSum += siteItem.units || 1;
+        binInfo.loadSum += siteItem.loadMetrics ? (siteItem.loadMetrics.loadPct || 0) : 0;
+        seenKeys.add(key);
+      }
+      for (const key of seenKeys) binsByKey.get(key).runHits++;
+    }
+    const runCount = Math.max(1, runRecords.length);
+    const bins = Array.from(binsByKey.values()).map(binInfo => ({
+      key: binInfo.key,
+      frequencyPct: 100 * binInfo.runHits / runCount,
+      lat: binInfo.latSum / Math.max(1, binInfo.stationHits),
+      lng: binInfo.lngSum / Math.max(1, binInfo.stationHits),
+      meanUnits: binInfo.unitSum / Math.max(1, binInfo.stationHits),
+      meanLoadPct: binInfo.loadSum / Math.max(1, binInfo.stationHits),
+      runHits: binInfo.runHits
+    })).sort((a, b) => b.frequencyPct - a.frequencyPct);
+    const robustCore = bins.filter(binInfo => binInfo.frequencyPct >= thresholdPct);
+    return { bins, robustCore };
+  }
+
+  function robustCoreStationsFromBins(robustCoreBins) {
+    return robustCoreBins.map((binInfo, idx) => ({
+      lat: binInfo.lat,
+      lng: binInfo.lng,
+      covered: binInfo.runHits,
+      incidentIdx: [],
+      radius: updateRadius(),
+      units: Math.max(1, Math.round(binInfo.meanUnits || 1)),
+      achievedServiceLevel: 1,
+      loadMetrics: { loadPct: binInfo.meanLoadPct || 0, queueRiskPct: 0, riskLevel: loadRiskLevel(binInfo.meanLoadPct || 0, 0) },
+      color: '#dce6ef',
+      typeName: `Robust Core ${idx + 1}`,
+      monteCarloFrequencyPct: binInfo.frequencyPct
+    }));
+  }
+
+  function aggregateMonteCarlo(runRecords, demandGrid, settings, startedAtMs) {
+    const summaries = runRecords.map(record => record.summary);
+    const confidenceLevel = settings.confidenceLevel || 0.9;
+    const kpiInterval = confidenceInterval(summaries.map(item => item.kpiPct), confidenceLevel);
+    const stationInterval = confidenceInterval(summaries.map(item => item.stationCount), confidenceLevel);
+    const unitInterval = confidenceInterval(summaries.map(item => item.unitCount), confidenceLevel);
+    const loadInterval = confidenceInterval(summaries.map(item => item.loadPct), confidenceLevel);
+    for (const summaryItem of summaries) {
+      summaryItem.medianDistanceScore =
+        Math.abs(summaryItem.kpiPct - kpiInterval.median) +
+        Math.abs(summaryItem.stationCount - stationInterval.median) * 5 +
+        Math.abs(summaryItem.unitCount - unitInterval.median) * 2 +
+        Math.abs(summaryItem.loadPct - loadInterval.median);
+    }
+    const binMeters = Math.max(500, (demandGrid.bandwidthMeters || 1000) / 2);
+    const stationAggregation = aggregateStationBins(runRecords, binMeters, settings.robustCoreThresholdPct || 60);
+    const bestRun = runRecords.slice().sort((a, b) => b.summary.kpiPct - a.summary.kpiPct)[0] || null;
+    const worstKpiRun = runRecords.slice().sort((a, b) => a.summary.kpiPct - b.summary.kpiPct)[0] || null;
+    const highestUnitRun = runRecords.slice().sort((a, b) => b.summary.unitCount - a.summary.unitCount)[0] || null;
+    const retainIds = new Set([bestRun, worstKpiRun, highestUnitRun].filter(Boolean).map(record => record.summary.runId));
+    for (const record of runRecords) {
+      if (!retainIds.has(record.summary.runId)) delete record.syntheticIncidents;
+    }
+    return {
+      mode: PLANNING_MODE.MONTE_CARLO,
+      settings,
+      summaries,
+      runRecords,
+      intervals: {
+        kpiPct: kpiInterval,
+        stationCount: stationInterval,
+        unitCount: unitInterval,
+        loadPct: loadInterval
+      },
+      stationAggregation,
+      robustCoreStations: robustCoreStationsFromBins(stationAggregation.robustCore),
+      runtimeMs: performance.now() - startedAtMs,
+      retainedRunIds: Array.from(retainIds),
+      binMeters
+    };
+  }
+
+  function renderMonteCarloProgress(done, total) {
+    const panel = document.getElementById('mcProgressPanel');
+    const textEl = document.getElementById('mcProgressText');
+    if (panel) panel.style.display = 'flex';
+    if (textEl) textEl.textContent = `Running Monte Carlo ${done} / ${total}...`;
+  }
+
+  function hideMonteCarloProgress() {
+    const panel = document.getElementById('mcProgressPanel');
+    if (panel) panel.style.display = 'none';
+  }
+
+  async function runMonteCarloCore(planning, settings, onProgress) {
+    const startedAtMs = performance.now();
+    const smoothedSettings = {
+      ...getSmoothedGrowthSettings(),
+      growthMultiplier: 1
+    };
+    const demandGrid = lastDemandGrid || buildDemandGrid(incidents, smoothedSettings);
+    const spatialSampler = buildSpatialSampler(demandGrid);
+    const temporalProfile = fitTemporalProfile(incidents, settings);
+    const warnings = temporalProfile.warning ? [temporalProfile.warning] : [];
+    const baseSeed = settings.randomSeed != null ? settings.randomSeed : Math.floor(Date.now() % 2147483647);
+    const runRecords = [];
+    for (let runIndex = 0; runIndex < settings.runCount; runIndex++) {
+      if (monteCarloController && monteCarloController.cancelled) throw new Error('Monte Carlo cancelled');
+      const runStartedAtMs = performance.now();
+      const runSeed = (baseSeed + runIndex * 9973) >>> 0;
+      const syntheticFuture = sampleSyntheticFuture(spatialSampler, demandGrid, temporalProfile, settings, runSeed);
+      const runResult = runOptimizerForSyntheticFuture(syntheticFuture, planning);
+      const summaryItem = summarizeMonteCarloRun(runIndex + 1, runSeed, syntheticFuture, runResult, performance.now() - runStartedAtMs, warnings);
+      runRecords.push({
+        summary: summaryItem,
+        stations: runResult.stations.map(siteItem => ({ ...siteItem, incidentIdx: Array.isArray(siteItem.incidentIdx) ? siteItem.incidentIdx.slice() : [] })),
+        syntheticIncidents: syntheticFuture
+      });
+      if (onProgress) onProgress(runIndex + 1, settings.runCount);
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    const aggregate = aggregateMonteCarlo(runRecords, demandGrid, settings, startedAtMs);
+    aggregate.demandGrid = demandGrid;
+    aggregate.spatialSampler = spatialSampler;
+    aggregate.temporalProfile = temporalProfile;
+    aggregate.baseSeed = baseSeed;
+    aggregate.warnings = warnings;
+    return aggregate;
+  }
+
+  function formatInterval(intervalValue, digits) {
+    const precision = digits == null ? 1 : digits;
+    return `${intervalValue.low.toFixed(precision)}-${intervalValue.high.toFixed(precision)}`;
+  }
+
+  function renderMonteCarloHeadline(result) {
+    const confidencePct = Math.round((result.settings.confidenceLevel || 0.9) * 100);
+    const robustCount = result.stationAggregation.robustCore.length;
+    document.getElementById('m-stations').textContent = robustCount;
+    document.getElementById('m-units').textContent = Math.round(result.intervals.unitCount.median);
+    document.getElementById('m-coverage').innerHTML = `${confidencePct}<span class="metric-unit">% CI</span>`;
+    document.getElementById('m-kpi').innerHTML = `${result.intervals.kpiPct.median.toFixed(1)}<span class="metric-unit">%</span>`;
+    let statusHtml = `<strong>Monte Carlo complete</strong> - ${result.summaries.length} runs in ${(result.runtimeMs / 1000).toFixed(1)}s`;
+    statusHtml += `<br>Robust core: ${robustCount} station bin${robustCount === 1 ? '' : 's'} @ ${result.settings.robustCoreThresholdPct}% threshold`;
+    statusHtml += `<br>Median KPI: ${result.intervals.kpiPct.median.toFixed(1)}% | ${confidencePct}% KPI CI ${formatInterval(result.intervals.kpiPct)}%`;
+    statusHtml += `<br>Station count CI ${formatInterval(result.intervals.stationCount, 0)} | Units CI ${formatInterval(result.intervals.unitCount, 0)} | Load CI ${formatInterval(result.intervals.loadPct)}%`;
+    statusHtml += `<br>Aggregation bin: ${formatDistance(result.binMeters)} | temporal model: ${result.temporalProfile.temporalModelQuality}`;
+    if (result.warnings && result.warnings.length) statusHtml += `<br><span style="color:var(--incident)">${escapeHtml(result.warnings[0])}</span>`;
+    const status = document.getElementById('status3');
+    if (status) {
+      status.innerHTML = statusHtml;
+      status.classList.add('good');
+    }
+  }
+
+  function sortedMonteCarloSummaries(sortMode) {
+    if (!monteCarloResult) return [];
+    const rows = monteCarloResult.summaries.slice();
+    if (sortMode === 'most-stations') return rows.sort((a, b) => b.stationCount - a.stationCount);
+    if (sortMode === 'most-units') return rows.sort((a, b) => b.unitCount - a.unitCount);
+    if (sortMode === 'highest-load') return rows.sort((a, b) => b.loadPct - a.loadPct);
+    if (sortMode === 'distance-from-median') return rows.sort((a, b) => b.medianDistanceScore - a.medianDistanceScore);
+    return rows.sort((a, b) => a.kpiPct - b.kpiPct);
+  }
+
+  function renderMonteCarloDebugPanel() {
+    const panel = document.getElementById('mcDebugPanel');
+    const table = document.getElementById('mcRunTable');
+    if (!panel || !table || !monteCarloResult) return;
+    panel.style.display = 'block';
+    const sortSelect = document.getElementById('mcRunSort');
+    const rows = sortedMonteCarloSummaries(sortSelect ? sortSelect.value : 'worst-kpi');
+    const header = `<div class="mc-run-row header">
+      <span>Run</span><span>Seed</span><span>Calls</span><span>Sites</span><span>Units</span><span>KPI</span><span>Load</span><span>Actions</span>
+    </div>`;
+    table.innerHTML = header + rows.map(summaryItem => `
+      <div class="mc-run-row" data-run-id="${escapeHtml(summaryItem.runId)}">
+        <span>${summaryItem.runNumber}</span>
+        <span>${summaryItem.seed}</span>
+        <span>${summaryItem.incidentCount}</span>
+        <span>${summaryItem.stationCount}</span>
+        <span>${summaryItem.unitCount}</span>
+        <span>${summaryItem.kpiPct.toFixed(1)}%</span>
+        <span>${summaryItem.loadPct.toFixed(0)}%</span>
+        <span class="mc-actions">
+          <button class="mini-btn" type="button" data-mc-view="${escapeHtml(summaryItem.runId)}">View</button>
+          <button class="mini-btn" type="button" data-mc-compare="${escapeHtml(summaryItem.runId)}">Compare</button>
+          <button class="mini-btn" type="button" data-mc-copy="${summaryItem.seed}">Seed</button>
+        </span>
+      </div>`).join('');
+    table.querySelectorAll('[data-mc-view]').forEach(btn => {
+      btn.onclick = () => inspectMonteCarloRun(btn.dataset.mcView, false);
+    });
+    table.querySelectorAll('[data-mc-compare]').forEach(btn => {
+      btn.onclick = () => inspectMonteCarloRun(btn.dataset.mcCompare, true);
+    });
+    table.querySelectorAll('[data-mc-copy]').forEach(btn => {
+      btn.onclick = () => {
+        if (navigator.clipboard) navigator.clipboard.writeText(btn.dataset.mcCopy);
+        setFooter('Monte Carlo seed copied');
+      };
+    });
+  }
+
+  function getMonteCarloRunRecord(runId) {
+    if (!monteCarloResult) return null;
+    return monteCarloResult.runRecords.find(record => record.summary.runId === runId) || null;
+  }
+
+  function syntheticIncidentsForRun(record) {
+    if (!record || !monteCarloResult) return [];
+    if (!record.syntheticIncidents) {
+      record.syntheticIncidents = sampleSyntheticFuture(
+        monteCarloResult.spatialSampler,
+        monteCarloResult.demandGrid,
+        monteCarloResult.temporalProfile,
+        monteCarloResult.settings,
+        record.summary.seed
+      );
+    }
+    return record.syntheticIncidents;
+  }
+
+  function inspectMonteCarloRun(runId, compareToConsensus) {
+    const record = getMonteCarloRunRecord(runId);
+    if (!record) return;
+    if (!monteCarloInspectState) {
+      monteCarloInspectState = {
+        incidents: incidents.slice(),
+        stations: stations.map(siteItem => ({ ...siteItem, incidentIdx: Array.isArray(siteItem.incidentIdx) ? siteItem.incidentIdx.slice() : [] })),
+        coverage: Array.isArray(lastIncidentCoverage) ? lastIncidentCoverage.slice() : lastIncidentCoverage
+      };
+    }
+    incidents = syntheticIncidentsForRun(record).map(item => ({ ...item }));
+    stations = record.stations.map(siteItem => ({ ...siteItem, incidentIdx: Array.isArray(siteItem.incidentIdx) ? siteItem.incidentIdx.slice() : [] }));
+    if (compareToConsensus && monteCarloResult.robustCoreStations.length) {
+      stations = stations.concat(monteCarloResult.robustCoreStations.map(siteItem => ({
+        ...siteItem,
+        color: '#7CE8B4',
+        typeName: `${siteItem.typeName} (${siteItem.monteCarloFrequencyPct.toFixed(0)}%)`
+      })));
+    }
+    renderIncidents(coveredArrayFromStations());
+    renderStations(stations);
+    renderStationReportList();
+    renderStationDetail(null);
+    const status = document.getElementById('status3');
+    if (status) {
+      status.innerHTML = `Inspecting Monte Carlo run ${record.summary.runNumber} of ${monteCarloResult.summaries.length}. This is a sampled future, not the consensus plan.${compareToConsensus ? '<br>Compare mode: robust core stations are appended in green.' : ''}`;
+      status.classList.add('good');
+    }
+    setFooter(compareToConsensus ? 'Comparing Monte Carlo run to consensus' : 'Inspecting Monte Carlo run');
+  }
+
+  function returnToMonteCarloConsensus() {
+    if (monteCarloInspectState) {
+      incidents = monteCarloInspectState.incidents;
+      stations = monteCarloInspectState.stations;
+      renderIncidents(monteCarloInspectState.coverage);
+      renderStations(stations);
+      monteCarloInspectState = null;
+    } else {
+      stationLayer.clearLayers();
+      coverageLayer.clearLayers();
+      selectedStationLayer.clearLayers();
+      stations = [];
+      renderIncidents(null);
+    }
+    if (monteCarloResult) {
+      renderMonteCarloHeadline(monteCarloResult);
+      renderMonteCarloDebugPanel();
+    }
+    setFooter('Returned to Monte Carlo aggregate');
+  }
+
+  function exportMonteCarloCsv() {
+    if (!monteCarloResult) return;
+    const rows = [['run','seed','synthetic_incidents','stations','units','kpi_pct','load_pct','queue_risk_pct','runtime_ms','warnings']];
+    for (const summaryItem of monteCarloResult.summaries) {
+      rows.push([
+        summaryItem.runNumber,
+        summaryItem.seed,
+        summaryItem.incidentCount,
+        summaryItem.stationCount,
+        summaryItem.unitCount,
+        summaryItem.kpiPct.toFixed(2),
+        summaryItem.loadPct.toFixed(2),
+        summaryItem.queueRiskPct.toFixed(2),
+        Math.round(summaryItem.runtimeMs),
+        (summaryItem.warnings || []).join('; ')
+      ]);
+    }
+    const csv = rows.map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\n');
+    triggerBlobDownload(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `UASC_DFR_Monte_Carlo_Runs_${new Date().toISOString().slice(0,10)}.csv`);
+  }
+
+  function wireMonteCarloDebugControls() {
+    const sortSelect = document.getElementById('mcRunSort');
+    if (sortSelect) sortSelect.onchange = renderMonteCarloDebugPanel;
+    const returnBtn = document.getElementById('mcReturnConsensusBtn');
+    if (returnBtn) returnBtn.onclick = returnToMonteCarloConsensus;
+    const exportBtn = document.getElementById('mcExportCsvBtn');
+    if (exportBtn) exportBtn.onclick = exportMonteCarloCsv;
+    const cancelBtn = document.getElementById('mcCancelBtn');
+    if (cancelBtn) cancelBtn.onclick = function() {
+      if (monteCarloController) monteCarloController.cancelled = true;
+      setFooter('Cancelling Monte Carlo...');
+    };
+  }
+
   // ============ INCIDENT HEATMAP ============
   const heatmapLayer = new HeatmapCanvasLayer(drawIncidentHeatmap);
 
@@ -2986,7 +3556,8 @@
     }).join('');
   }
 
-  function buildNetworkLoadSummary() {
+  function buildNetworkLoadSummary(siteList) {
+    siteList = siteList || stations;
     const hourly = new Array(24).fill(0);
     let busyHours = 0;
     let availableHours = 0;
@@ -2999,7 +3570,7 @@
     let weightedPeakLoad = 0;
     let weightedLoad = 0;
 
-    for (const s of stations) {
+    for (const s of siteList) {
       const load = s.loadMetrics || {};
       expectedIncidents += load.expectedIncidents || 0;
       busyHours += load.busyHours || 0;
@@ -3024,7 +3595,7 @@
         peakHour = i;
       }
     }
-    const totalUnits = stations.reduce((sum, s) => sum + Math.max(1, s.units || 1), 0);
+    const totalUnits = siteList.reduce((sum, s) => sum + Math.max(1, s.units || 1), 0);
     const utilizationPct = availableHours > 0 ? Math.min(999, 100 * busyHours / availableHours) : 0;
     const peakHourLoadPct = totalUnits > 0 ? weightedPeakLoad / totalUnits : 0;
     const loadPct = totalUnits > 0 ? Math.max(utilizationPct, weightedLoad / totalUnits) : 0;
@@ -3312,6 +3883,9 @@
     lastDemandGrid = null;
     lastPlanningResultMeta = null;
     window.__lastCurve = null;
+    hideMonteCarloProgress();
+    const mcDebug = document.getElementById('mcDebugPanel');
+    if (mcDebug) mcDebug.style.display = 'none';
     document.getElementById('m-stations').textContent = '-';
     document.getElementById('m-coverage').textContent = '-';
     document.getElementById('m-units').textContent = '-';
@@ -3518,6 +4092,8 @@
     lastDemandGrid = null;
     lastPlanningResultMeta = null;
     modeResultCache = {};
+    monteCarloResult = null;
+    monteCarloInspectState = null;
 
     areaPolygon = layer;
     areaLayer.addLayer(areaPolygon);
@@ -3591,6 +4167,8 @@
     lastDemandGrid = null;
     lastPlanningResultMeta = null;
     modeResultCache = {};
+    monteCarloResult = null;
+    monteCarloInspectState = null;
 
     if (mode === 'uniform') incidents = generateUniform(count);
     else if (mode === 'clustered') incidents = generateClustered(count);
@@ -3689,6 +4267,72 @@
     }
     if (optMode === 'fleet' && (fleetTypes.length === 0 || fleetTypes.every(t => (parseInt(t.count) || 0) === 0))) {
       setFooter('Add at least one drone type with a non-zero count');
+      return;
+    }
+    if (planningMode === PLANNING_MODE.MONTE_CARLO) {
+      const planning = getPlanningParams();
+      const mcSettings = getMonteCarloSettings();
+      monteCarloController = { cancelled: false };
+      monteCarloResult = null;
+      monteCarloInspectState = null;
+      renderMonteCarloProgress(0, mcSettings.runCount);
+      document.getElementById('optimizeBtn').disabled = true;
+      document.getElementById('optimizeBtn').textContent = 'Running...';
+      setFooter('Running Monte Carlo...');
+      const temporalProbe = fitTemporalProfile(incidents, mcSettings);
+      if (temporalProbe.warning) alert(temporalProbe.warning);
+      runMonteCarloCore(planning, mcSettings, renderMonteCarloProgress)
+        .then(result => {
+          monteCarloResult = result;
+          lastDemandGrid = result.demandGrid;
+          lastPlanningResultMeta = {
+            mode: PLANNING_MODE.MONTE_CARLO,
+            settings: result.settings,
+            demandGrid: {
+              resolution: result.demandGrid.resolution,
+              bandwidthMeters: result.demandGrid.bandwidthMeters,
+              demandThresholdPct: result.demandGrid.demandThresholdPct,
+              activeCellCount: result.demandGrid.activeCells.length,
+              droppedCellCount: result.demandGrid.droppedCells
+            },
+            traceIncidentCount: Math.round(percentileFromValues(result.summaries.map(summaryItem => summaryItem.incidentCount), 0.5)),
+            historicalIncidentCount: incidents.length,
+            monteCarlo: {
+              runCount: result.summaries.length,
+              robustCoreCount: result.stationAggregation.robustCore.length,
+              binMeters: result.binMeters,
+              runtimeMs: result.runtimeMs
+            }
+          };
+          stations = [];
+          selectedStationIndex = null;
+          stationLayer.clearLayers();
+          coverageLayer.clearLayers();
+          selectedStationLayer.clearLayers();
+          renderIncidents(null);
+          renderMonteCarloHeadline(result);
+          renderMonteCarloDebugPanel();
+          setPanelState('panel3', 'done');
+          syncStepNavButtons();
+          setFooter(`Monte Carlo complete - ${result.summaries.length} runs`);
+        })
+        .catch(err => {
+          if (err && err.message === 'Monte Carlo cancelled') {
+            setFooter('Monte Carlo cancelled');
+            document.getElementById('status3').textContent = 'Monte Carlo cancelled';
+            document.getElementById('status3').classList.remove('good');
+          } else {
+            console.error('Monte Carlo error:', err);
+            setFooter('Monte Carlo failed - see browser console');
+            alert('Monte Carlo failed: ' + (err && err.message ? err.message : err));
+          }
+        })
+        .finally(() => {
+          hideMonteCarloProgress();
+          monteCarloController = null;
+          document.getElementById('optimizeBtn').disabled = false;
+          document.getElementById('optimizeBtn').textContent = 'Re-compute';
+        });
       return;
     }
     setFooter(planningMode === PLANNING_MODE.SMOOTHED_GROWTH ? 'Computing smoothed demand deployment...' : 'Computing direct fit deployment...');
@@ -3834,6 +4478,8 @@
     lastDemandGrid = null;
     lastPlanningResultMeta = null;
     modeResultCache = {};
+    monteCarloResult = null;
+    monteCarloInspectState = null;
     updateNoFlyStatus();
     updateNoDeployStatus();
     updateWaterStatus();
@@ -3935,7 +4581,8 @@
           coverageTargetPct: planning.coverageTargetPct,
           minIncidentsPerSite: planning.minIncidentsPerSite
         },
-        smoothedGrowth: getSmoothedGrowthSettings()
+        smoothedGrowth: getSmoothedGrowthSettings(),
+        monteCarlo: getMonteCarloSettings()
       }),
       planning_result_meta: lastPlanningResultMeta ? {
         ...lastPlanningResultMeta,
@@ -3949,6 +4596,15 @@
         dropped_cell_count: lastDemandGrid.droppedCells,
         total_raw_weight: lastDemandGrid.totalRawWeight,
         max_weight: lastDemandGrid.maxWeight
+      } : null,
+      monte_carlo: monteCarloResult ? {
+        settings: monteCarloResult.settings,
+        runtime_ms: monteCarloResult.runtimeMs,
+        bin_meters: monteCarloResult.binMeters,
+        robust_core_count: monteCarloResult.stationAggregation.robustCore.length,
+        retained_run_ids: monteCarloResult.retainedRunIds,
+        intervals: monteCarloResult.intervals,
+        summaries: monteCarloResult.summaries
       } : null,
       ui: {
         step: activeStep,
@@ -4034,7 +4690,7 @@
         no_deploy_zone_rings: noDeployZones.map(serializePolygon),
         water_exclusion_zone_rings: waterZones.map(serializePolygon)
       },
-      incidents: incidents.map(i => ({ lat: i.lat, lng: i.lng, t: i.t, category: i.priority })),
+      incidents: incidents.map(i => ({ lat: i.lat, lng: i.lng, t: i.t, timestamp: i.timestamp || null, category: i.priority })),
       station_state: stations.map(s => ({
         lat: s.lat,
         lng: s.lng,
@@ -6130,6 +6786,7 @@
       lat: Number(i.lat),
       lng: Number(i.lng),
       t: Number(i.t || 0),
+      timestamp: i.timestamp || null,
       priority: i.priority || i.category || getDefaultCategoryId()
     })).filter(i => Number.isFinite(i.lat) && Number.isFinite(i.lng)) : [];
 
@@ -6705,6 +7362,8 @@
     lastDemandGrid = null;
     lastPlanningResultMeta = null;
     modeResultCache = {};
+    monteCarloResult = null;
+    monteCarloInspectState = null;
     renderIncidents(null);
 
     setPanelState('panel2', 'active');

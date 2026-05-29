@@ -451,6 +451,7 @@
  <div class="mode-tabs planning-mode-tabs" role="group" aria-label="Planning mode">
  <button class="mode-tab active" type="button" data-planning-mode="smoothed-growth">Smoothed Demand</button>
  <button class="mode-tab" type="button" data-planning-mode="direct-fit">Direct Fit</button>
+ <button class="mode-tab" type="button" data-planning-mode="monte-carlo">Monte Carlo</button>
  </div>
  <div class="status-line" id="directFitWarning" style="display:none;">Direct Fit places stations around the exact incidents loaded in this session. It is useful for forensic review, fixed-event planning, and explaining how a known historical period would have been covered. It is not suitable for procurement planning or annual deployment sizing because it can overfit isolated calls, missing records, and random historical noise. For station investment decisions, use Smoothed Demand + Growth or Monte Carlo.</div>
  <div id="smoothedGrowthPanel">
@@ -494,6 +495,66 @@
  </div>
  </div>
  </details>
+ </div>
+ <div id="monteCarloPanel" style="display:none;">
+ <div class="field-row">
+ <div class="field">
+ <label class="field-label">Monte Carlo Runs</label>
+ <input type="number" id="mcRunCount" value="30" min="10" max="100" step="1">
+ </div>
+ <div class="field">
+ <label class="field-label">Growth Scenario</label>
+ <select id="mcGrowthMultiplier">
+ <option value="1">+0% volume</option>
+ <option value="1.25">+25% volume</option>
+ <option value="1.5">+50% volume</option>
+ <option value="2">+100% volume</option>
+ </select>
+ </div>
+ </div>
+ <details class="advanced-settings" id="monteCarloAdvanced">
+ <summary>Advanced Monte Carlo settings</summary>
+ <div class="field-row" style="margin-top: 10px;">
+ <div class="field">
+ <label class="field-label">Confidence Level</label>
+ <select id="mcConfidenceLevel">
+ <option value="0.8">80%</option>
+ <option value="0.9" selected>90%</option>
+ <option value="0.95">95%</option>
+ </select>
+ </div>
+ <div class="field">
+ <label class="field-label">Robust Core Threshold (%)</label>
+ <input type="number" id="mcRobustCoreThreshold" value="60" min="50" max="80" step="5">
+ </div>
+ </div>
+ <div class="field">
+ <label class="field-label">Random Seed</label>
+ <input type="number" id="mcRandomSeed" placeholder="Optional">
+ </div>
+ </details>
+ <div class="mc-progress" id="mcProgressPanel" style="display:none;">
+ <div class="mc-progress-text" id="mcProgressText">Running Monte Carlo 0 / 30...</div>
+ <button class="btn btn-ghost" type="button" id="mcCancelBtn">Cancel</button>
+ </div>
+ <div class="mc-debug" id="mcDebugPanel" style="display:none;">
+ <div class="subsection-label">Inspect Runs</div>
+ <div class="field">
+ <label class="field-label">Sort Runs</label>
+ <select id="mcRunSort">
+ <option value="worst-kpi">Worst KPI</option>
+ <option value="most-stations">Most Stations</option>
+ <option value="most-units">Most Units</option>
+ <option value="highest-load">Highest Load</option>
+ <option value="distance-from-median">Distance From Median</option>
+ </select>
+ </div>
+ <div class="mc-run-actions">
+ <button class="btn btn-secondary" type="button" id="mcReturnConsensusBtn">Return to Consensus</button>
+ <button class="btn btn-secondary" type="button" id="mcExportCsvBtn">Export Run Summary CSV</button>
+ </div>
+ <div class="mc-run-table" id="mcRunTable"></div>
+ </div>
  </div>
  <div class="subsection-label">Planning Realism</div>
  <div class="field-row">
