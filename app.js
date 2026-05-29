@@ -5643,10 +5643,10 @@
       pdf.setFont('helvetica', 'normal');
       text(T.muted);
       pdf.text('Unmanned Aerial Systems Center — Dubai Police', M + 30, 17.5);
-      const modeLabel = (optMode === 'minimize')
+      const optimizerModeLabel = (optMode === 'minimize')
         ? 'Capacity Sizing — required units calculated'
         : 'Fixed Fleet — existing assets allocated';
-      pdf.text(modeLabel + '  ·  ' + new Date().toLocaleString(), M + 30, 21);
+      pdf.text(optimizerModeLabel + '  ·  ' + new Date().toLocaleString(), M + 30, 21);
 
       stroke(T.border);
       pdf.setLineWidth(0.3);
