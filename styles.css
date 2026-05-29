@@ -352,6 +352,57 @@ code { font-family: 'JetBrains Mono'; font-size: 10.5px; background: var(--surfa
 .pb-pct {
   margin-left: 4px; color: var(--text-dim); font-size: 9px;
 }
+
+.heatmap-panel {
+  margin: 12px 0;
+  padding: 10px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--cyan-dim);
+}
+.heatmap-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+.heatmap-head .subsection-label {
+  margin: 0 0 4px;
+  display: block;
+}
+.heatmap-head .help {
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+.heatmap-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono';
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.heatmap-toggle input {
+  accent-color: var(--cyan);
+}
+.heatmap-summary {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono';
+  font-size: 10px;
+  line-height: 1.45;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.dfr-heatmap-layer {
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
 #fleetList:empty + #addTypeBtn { margin-top: 0; }
 
 .panel-permanent .step-tag { background: rgba(220, 230, 239, 0.12); color: var(--accent); border: 1px solid rgba(220, 230, 239, 0.22); }

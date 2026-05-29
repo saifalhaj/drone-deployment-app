@@ -40,8 +40,54 @@
   const incidentLayer = new L.LayerGroup().addTo(map);
   const stationLayer = new L.LayerGroup().addTo(map);
   const selectedStationLayer = new L.LayerGroup().addTo(map);
+  map.createPane('heatmapPane');
+  map.getPane('heatmapPane').style.zIndex = 405;
+  map.getPane('heatmapPane').style.pointerEvents = 'none';
 
   // Drawing handled by custom controls in sidebar (see EVENTS section)
+
+  const HeatmapCanvasLayer = L.Layer.extend({
+    initialize(drawFn) {
+      this._drawFn = drawFn;
+      this._canvas = null;
+      this._frame = null;
+    },
+    onAdd(targetMap) {
+      this._map = targetMap;
+      this._canvas = L.DomUtil.create('canvas', 'dfr-heatmap-layer leaflet-layer');
+      targetMap.getPane('heatmapPane').appendChild(this._canvas);
+      targetMap.on('move zoom resize viewreset', this._scheduleDraw, this);
+      this._reset();
+    },
+    onRemove(targetMap) {
+      targetMap.off('move zoom resize viewreset', this._scheduleDraw, this);
+      if (this._frame) L.Util.cancelAnimFrame(this._frame);
+      L.DomUtil.remove(this._canvas);
+      this._canvas = null;
+    },
+    redraw() {
+      this._scheduleDraw();
+    },
+    _scheduleDraw() {
+      if (this._frame) L.Util.cancelAnimFrame(this._frame);
+      this._frame = L.Util.requestAnimFrame(this._reset, this);
+    },
+    _reset() {
+      if (!this._map || !this._canvas) return;
+      const size = this._map.getSize();
+      const topLeft = this._map.containerPointToLayerPoint([0, 0]);
+      L.DomUtil.setPosition(this._canvas, topLeft);
+      const dpr = window.devicePixelRatio || 1;
+      this._canvas.style.width = size.x + 'px';
+      this._canvas.style.height = size.y + 'px';
+      this._canvas.width = Math.max(1, Math.round(size.x * dpr));
+      this._canvas.height = Math.max(1, Math.round(size.y * dpr));
+      const ctx = this._canvas.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, size.x, size.y);
+      this._drawFn(ctx, size);
+    }
+  });
 
   // ============ STATE ============
   let areaPolygon = null;
@@ -54,6 +100,11 @@
   let unitSystem = 'metric';
   let coordFormat = 'decimal';
   let boundaryFeatures = [];
+  let heatmapMode = 'all';
+  let heatmapEnabled = false;
+  let heatmapCategoryId = 'all';
+  let heatmapHourFilter = 'all';
+  let heatmapMonthFilter = 'all';
 
   // ============ UTILITIES ============
   function haversine(a, b) {
@@ -1199,6 +1250,8 @@
       weight: seed.weight != null ? seed.weight : 1
     });
     renderCategoriesList();
+    populateHeatmapCategories();
+    refreshHeatmap();
   }
 
   function removeCategory(id) {
@@ -1212,6 +1265,7 @@
       }
     }
     renderCategoriesList();
+    populateHeatmapCategories();
     renderIncidents(null);
   }
 
@@ -1289,6 +1343,10 @@
         if (field === 'weight' || field === 'kpiSec' || field === 'overheadSec') rebuildMixDisplays();
         // Re-render incidents to reflect color/name changes immediately
         if (field === 'color' || field === 'name') renderIncidents(null);
+        if (field === 'color' || field === 'name' || field === 'weight') {
+          populateHeatmapCategories();
+          refreshHeatmap();
+        }
         // KPI seconds OR overhead affects the derived coverage radius
         if (field === 'kpiSec' || field === 'overheadSec') updateRadius();
       };
@@ -1643,6 +1701,171 @@
     return { stations, covered, coveragePercent: 100 * numCovered / n };
   }
 
+  // ============ INCIDENT HEATMAP ============
+  const heatmapLayer = new HeatmapCanvasLayer(drawIncidentHeatmap);
+
+  function hexToRgbParts(hex) {
+    const h = String(hex || '#7CDCE8').replace('#', '');
+    const full = h.length === 3 ? h.split('').map(ch => ch + ch).join('') : h;
+    return [
+      parseInt(full.slice(0, 2), 16) || 124,
+      parseInt(full.slice(2, 4), 16) || 220,
+      parseInt(full.slice(4, 6), 16) || 232
+    ];
+  }
+
+  function incidentDateParts(inc) {
+    if (inc && inc.timestamp) {
+      const d = new Date(inc.timestamp);
+      if (!Number.isNaN(d.getTime())) return { hour: d.getHours(), month: d.getMonth(), real: true };
+    }
+    const t = Number(inc && inc.t ? inc.t : 0);
+    const period = parseFloat(document.getElementById('kpiTimeWindow')?.value) || 24;
+    const hour = ((Math.floor(t) % 24) + 24) % 24;
+    const month = Math.max(0, Math.min(11, Math.floor(((t % Math.max(period, 1)) / Math.max(period, 1)) * 12)));
+    return { hour, month, real: false };
+  }
+
+  function getPeakIncidentHour() {
+    const buckets = new Array(24).fill(0);
+    for (const inc of incidents) buckets[incidentDateParts(inc).hour]++;
+    let peak = 0;
+    for (let i = 1; i < buckets.length; i++) {
+      if (buckets[i] > buckets[peak]) peak = i;
+    }
+    return peak;
+  }
+
+  function isPriorityHeatIncident(inc) {
+    const maxWeight = Math.max(0, ...incidentCategories.map(c => Number(c.weight) || 0));
+    const cat = getCategoryById(inc.priority);
+    return (Number(cat.weight) || 0) >= maxWeight - 1e-9;
+  }
+
+  function getHeatmapFilteredIncidents() {
+    if (!Array.isArray(incidents) || incidents.length === 0) return [];
+    const peakHour = heatmapHourFilter === 'peak' ? getPeakIncidentHour() : null;
+    return incidents.filter(inc => {
+      const parts = incidentDateParts(inc);
+      if (heatmapMode === 'priority' && !isPriorityHeatIncident(inc)) return false;
+      if (heatmapMode === 'type' && heatmapCategoryId !== 'all' && inc.priority !== heatmapCategoryId) return false;
+      if (heatmapMode === 'tod') {
+        if (heatmapHourFilter === 'day' && (parts.hour < 6 || parts.hour >= 18)) return false;
+        if (heatmapHourFilter === 'night' && parts.hour >= 6 && parts.hour < 18) return false;
+        if (heatmapHourFilter === 'peak' && parts.hour !== peakHour) return false;
+      }
+      if (heatmapMode === 'month' && heatmapMonthFilter !== 'all' && parts.month !== parseInt(heatmapMonthFilter, 10)) return false;
+      return true;
+    });
+  }
+
+  function heatmapColorForIncident(inc) {
+    if (heatmapMode === 'type') return getCategoryById(inc.priority).color;
+    if (heatmapMode === 'priority') return '#FF6B7E';
+    if (heatmapMode === 'tod') {
+      const hour = incidentDateParts(inc).hour;
+      return (hour >= 6 && hour < 18) ? '#E8A744' : '#7CDCE8';
+    }
+    if (heatmapMode === 'month') return '#7CE8B4';
+    return '#7CDCE8';
+  }
+
+  function drawHeatSpot(ctx, x, y, radius, color, intensity) {
+    const rgb = hexToRgbParts(color);
+    const g = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    g.addColorStop(0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${0.34 * intensity})`);
+    g.addColorStop(0.38, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${0.18 * intensity})`);
+    g.addColorStop(1, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawIncidentHeatmap(ctx) {
+    if (!heatmapEnabled) return;
+    const filtered = getHeatmapFilteredIncidents();
+    if (filtered.length === 0) return;
+    const zoom = map.getZoom();
+    const radius = Math.max(16, Math.min(54, 18 + zoom * 1.6));
+    const maxWeight = Math.max(1, ...incidentCategories.map(c => Number(c.weight) || 0));
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const inc of filtered) {
+      const p = map.latLngToContainerPoint([inc.lat, inc.lng]);
+      const cat = getCategoryById(inc.priority);
+      const weight = Math.max(0.55, Math.min(1.4, (Number(cat.weight) || 1) / maxWeight + 0.45));
+      drawHeatSpot(ctx, p.x, p.y, radius, heatmapColorForIncident(inc), weight);
+    }
+    ctx.restore();
+  }
+
+  function updateHeatmapControls() {
+    const categoryField = document.getElementById('heatmapCategoryField');
+    const hourField = document.getElementById('heatmapHourField');
+    const monthField = document.getElementById('heatmapMonthField');
+    if (categoryField) categoryField.style.display = heatmapMode === 'type' ? 'block' : 'none';
+    if (hourField) hourField.style.display = heatmapMode === 'tod' ? 'block' : 'none';
+    if (monthField) monthField.style.display = heatmapMode === 'month' ? 'block' : 'none';
+  }
+
+  function updateHeatmapSummary() {
+    const el = document.getElementById('heatmapSummary');
+    if (!el) return;
+    if (incidents.length === 0) {
+      el.textContent = 'Load incidents to render demand density.';
+      return;
+    }
+    const filtered = getHeatmapFilteredIncidents();
+    const modeLabel = {
+      all: 'incident density',
+      priority: 'priority-only demand',
+      tod: 'time-of-day demand',
+      type: 'incident type demand',
+      month: 'monthly demand'
+    }[heatmapMode] || 'incident density';
+    el.textContent = `${filtered.length} of ${incidents.length} incidents shown · ${modeLabel}`;
+  }
+
+  function refreshHeatmap() {
+    if (heatmapEnabled && incidents.length > 0) {
+      if (!map.hasLayer(heatmapLayer)) heatmapLayer.addTo(map);
+      heatmapLayer.redraw();
+    } else if (map.hasLayer(heatmapLayer)) {
+      map.removeLayer(heatmapLayer);
+    }
+    updateHeatmapControls();
+    updateHeatmapSummary();
+  }
+
+  function populateHeatmapCategories() {
+    const select = document.getElementById('heatmapCategory');
+    if (!select) return;
+    const previous = select.value || heatmapCategoryId;
+    select.innerHTML = '<option value="all">All incident types</option>' + incidentCategories.map(c =>
+      `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`
+    ).join('');
+    select.value = incidentCategories.some(c => c.id === previous) ? previous : 'all';
+    heatmapCategoryId = select.value;
+  }
+
+  function wireHeatmapControls() {
+    populateHeatmapCategories();
+    const enabled = document.getElementById('heatmapEnabled');
+    const mode = document.getElementById('heatmapMode');
+    const cat = document.getElementById('heatmapCategory');
+    const hour = document.getElementById('heatmapHour');
+    const month = document.getElementById('heatmapMonth');
+    if (enabled) enabled.onchange = function() { heatmapEnabled = this.checked; refreshHeatmap(); };
+    if (mode) mode.onchange = function() { heatmapMode = this.value; refreshHeatmap(); };
+    if (cat) cat.onchange = function() { heatmapCategoryId = this.value; refreshHeatmap(); };
+    if (hour) hour.onchange = function() { heatmapHourFilter = this.value; refreshHeatmap(); };
+    if (month) month.onchange = function() { heatmapMonthFilter = this.value; refreshHeatmap(); };
+    refreshHeatmap();
+  }
+
+  wireHeatmapControls();
+
   // ============ RENDERING ============
   function renderIncidents(coveredArr) {
     incidentLayer.clearLayers();
@@ -1691,6 +1914,7 @@
       }).bindTooltip(cat.name + (inNoFly ? ' - inside no-fly' : ''), { direction: 'top', offset: [0, -4] })
         .addTo(incidentLayer);
     }
+    refreshHeatmap();
   }
 
   function renderStations(stations) {
@@ -2254,6 +2478,7 @@
     const dlArea = document.getElementById('downloadArea');
     if (dlArea) dlArea.disabled = false;
     clearStationReport();
+    refreshHeatmap();
     syncStepNavButtons();
     setFooter('Area defined');
   }
@@ -2514,6 +2739,7 @@
     if (chartBlock) chartBlock.style.display = 'none';
     clearStationReport();
     window.__lastCurve = null;
+    refreshHeatmap();
     setFooter('Idle');
     activateWorkflowStep(1);
   }
@@ -2578,7 +2804,14 @@
         step: activeStep,
         unitSystem,
         coordFormat,
-        incidentSource
+        incidentSource,
+        heatmap: {
+          enabled: heatmapEnabled,
+          mode: heatmapMode,
+          category: heatmapCategoryId,
+          hour: heatmapHourFilter,
+          month: heatmapMonthFilter
+        }
       },
       mission_profile: {
         incident_period_h: kpi.periodHours,
@@ -4057,7 +4290,24 @@
       }
     }
 
-    // 3e. Incident dots (category-colored). Larger weight = larger dot, same logic
+    // 3e. Optional incident-demand heatmap, included in the PDF when enabled.
+    if (heatmapEnabled && incidents.length > 0) {
+      const filtered = getHeatmapFilteredIncidents();
+      const radius = Math.max(18, Math.min(56, 18 + map.getZoom() * 1.6));
+      const heatWeights = incidentCategories.map(c => c.weight || 0);
+      const heatMaxW = Math.max(1, ...heatWeights);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (const inc of filtered) {
+        const p = ll2px({ lat: inc.lat, lng: inc.lng });
+        const cat = getCategoryById(inc.priority);
+        const intensity = Math.max(0.55, Math.min(1.4, (Number(cat.weight) || 1) / heatMaxW + 0.45));
+        drawHeatSpot(ctx, p.x, p.y, radius, heatmapColorForIncident(inc), intensity);
+      }
+      ctx.restore();
+    }
+
+    // 3f. Incident dots (category-colored). Larger weight = larger dot, same logic
     // as the on-screen renderer.
     const weights = incidentCategories.map(c => c.weight || 0);
     const maxW = Math.max(1, ...weights);
@@ -4072,7 +4322,7 @@
       ctx.fill();
     }
 
-    // 3f. Station markers (drawn last so they sit on top of everything else).
+    // 3g. Station markers (drawn last so they sit on top of everything else).
     // Match the on-screen style: orange disc with dark outline, count label inside.
     for (let i = 0; i < stations.length; i++) {
       const s = stations[i];
@@ -4591,6 +4841,17 @@
     setInputValue('manualRadius', inputs.manual_radius);
     setInputValue('incidentCount', inputs.incident_count);
     setInputValue('patternMode', inputs.distribution || (plan.parameters && plan.parameters.distribution));
+    const heatmapState = ui.heatmap || {};
+    heatmapEnabled = !!heatmapState.enabled;
+    heatmapMode = heatmapState.mode || 'all';
+    heatmapCategoryId = heatmapState.category || 'all';
+    heatmapHourFilter = heatmapState.hour || 'all';
+    heatmapMonthFilter = heatmapState.month || 'all';
+    const heatmapEnabledEl = document.getElementById('heatmapEnabled');
+    if (heatmapEnabledEl) heatmapEnabledEl.checked = heatmapEnabled;
+    setInputValue('heatmapMode', heatmapMode);
+    setInputValue('heatmapHour', heatmapHourFilter);
+    setInputValue('heatmapMonth', heatmapMonthFilter);
 
     if (Array.isArray(plan.incident_categories) && plan.incident_categories.length > 0) {
       incidentCategories = plan.incident_categories.map(c => ({
@@ -4604,6 +4865,8 @@
       }));
       renderCategoriesList();
     }
+    populateHeatmapCategories();
+    setInputValue('heatmapCategory', heatmapCategoryId);
 
     modeToggle(plan.mode === 'fleet' ? 'fleet' : 'minimize');
     if (Array.isArray(plan.fleet_types)) {

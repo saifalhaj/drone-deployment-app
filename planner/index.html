@@ -314,6 +314,62 @@
 
  <div class="status-line" id="status2">No incident data</div>
 
+ <div class="heatmap-panel" id="incidentHeatmapPanel">
+ <div class="heatmap-head">
+ <div>
+ <span class="subsection-label">Demand Heatmap</span>
+ <p class="help">Visualize where incidents concentrate before assessing coverage.</p>
+ </div>
+ <label class="heatmap-toggle"><input type="checkbox" id="heatmapEnabled"> Show</label>
+ </div>
+ <div class="field-row">
+ <div class="field">
+ <label class="field-label">Layer</label>
+ <select id="heatmapMode">
+ <option value="all">Incident density</option>
+ <option value="priority">Priority-only heatmap</option>
+ <option value="tod">Time-of-day heatmap</option>
+ <option value="type">Incident type heatmap</option>
+ <option value="month">Seasonal / monthly demand</option>
+ </select>
+ </div>
+ <div class="field" id="heatmapCategoryField">
+ <label class="field-label">Incident Type</label>
+ <select id="heatmapCategory"></select>
+ </div>
+ </div>
+ <div class="field-row">
+ <div class="field" id="heatmapHourField">
+ <label class="field-label">Time of Day</label>
+ <select id="heatmapHour">
+ <option value="all">All hours</option>
+ <option value="day">Day shift · 06-18</option>
+ <option value="night">Night shift · 18-06</option>
+ <option value="peak">Peak hour only</option>
+ </select>
+ </div>
+ <div class="field" id="heatmapMonthField">
+ <label class="field-label">Month</label>
+ <select id="heatmapMonth">
+ <option value="all">All months</option>
+ <option value="0">January</option>
+ <option value="1">February</option>
+ <option value="2">March</option>
+ <option value="3">April</option>
+ <option value="4">May</option>
+ <option value="5">June</option>
+ <option value="6">July</option>
+ <option value="7">August</option>
+ <option value="8">September</option>
+ <option value="9">October</option>
+ <option value="10">November</option>
+ <option value="11">December</option>
+ </select>
+ </div>
+ </div>
+ <div class="heatmap-summary" id="heatmapSummary">Load incidents to render demand density.</div>
+ </div>
+
  <div id="incidentStatsBlock" class="stats-block" style="display:none;">
  <div class="stats-header">
  <span>Incident Statistics</span>
