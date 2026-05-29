@@ -767,6 +767,7 @@
       s.achievedByPriority = sim.byPriority;
       s.clusterTotals = sim.totals;
       s.peakConcurrent = peakConcurrent(cluster, serviceTimeHours);
+      s.loadMetrics = computeStationLoadMetrics(cluster, s.units, stationServiceMin, kpi.periodHours);
       // Per-category shortfall flags
       s.priorityShortfall = {};
       for (const c of incidentCategories) {
@@ -791,6 +792,96 @@
       if (endTimes.length > peak) peak = endTimes.length;
     }
     return peak;
+  }
+
+  function loadRiskLevel(loadPct, queueRiskPct) {
+    if (queueRiskPct >= 10 || loadPct >= 85) return 'High';
+    if (queueRiskPct >= 3 || loadPct >= 60) return 'Medium';
+    return 'Low';
+  }
+
+  function computeStationLoadMetrics(cluster, units, serviceTimeMin, periodHours) {
+    const safeCluster = Array.isArray(cluster) ? cluster.filter(Boolean) : [];
+    const safeUnits = Math.max(1, units || 1);
+    const safeServiceMin = Math.max(1, serviceTimeMin || 15);
+    const safeServiceHours = safeServiceMin / 60;
+    const safePeriodHours = Math.max(1, periodHours || 24);
+    const totalIncidents = safeCluster.length;
+    const hourly = new Array(24).fill(0);
+    let peakHour = 0;
+    let peakHourCount = 0;
+
+    for (const inc of safeCluster) {
+      const h = Math.floor((((inc.t || 0) % 24) + 24) % 24);
+      hourly[h]++;
+      if (hourly[h] > peakHourCount) {
+        peakHourCount = hourly[h];
+        peakHour = h;
+      }
+    }
+
+    const freeAt = new Array(safeUnits).fill(0);
+    const activeEndTimes = [];
+    const sorted = safeCluster.slice().sort((a, b) => (a.t || 0) - (b.t || 0));
+    let queuedIncidents = 0;
+    let totalDelayHours = 0;
+    let maxDelayHours = 0;
+    let overlappingIncidents = 0;
+    let peakConcurrentDemand = 0;
+
+    for (const inc of sorted) {
+      const arrival = inc.t || 0;
+      while (activeEndTimes.length > 0 && activeEndTimes[0] <= arrival) activeEndTimes.shift();
+      if (activeEndTimes.length > 0) overlappingIncidents++;
+      peakConcurrentDemand = Math.max(peakConcurrentDemand, activeEndTimes.length + 1);
+
+      let bestUnit = 0;
+      for (let i = 1; i < freeAt.length; i++) {
+        if (freeAt[i] < freeAt[bestUnit]) bestUnit = i;
+      }
+      const delay = Math.max(0, freeAt[bestUnit] - arrival);
+      if (delay > 0) {
+        queuedIncidents++;
+        totalDelayHours += delay;
+        maxDelayHours = Math.max(maxDelayHours, delay);
+      }
+      const start = arrival + delay;
+      const end = start + safeServiceHours;
+      freeAt[bestUnit] = end;
+      let pos = 0;
+      while (pos < activeEndTimes.length && activeEndTimes[pos] < end) pos++;
+      activeEndTimes.splice(pos, 0, end);
+    }
+
+    const busyHours = totalIncidents * safeServiceHours;
+    const availableHours = safeUnits * safePeriodHours;
+    const utilizationPct = availableHours > 0 ? Math.min(999, 100 * busyHours / availableHours) : 0;
+    const peakHourLoadPct = Math.min(999, 100 * peakHourCount * safeServiceHours / safeUnits);
+    const loadPct = Math.max(utilizationPct, peakHourLoadPct);
+    const queueRiskPct = totalIncidents > 0 ? 100 * queuedIncidents / totalIncidents : 0;
+    const overlapRiskPct = totalIncidents > 0 ? 100 * overlappingIncidents / totalIncidents : 0;
+
+    return {
+      expectedIncidents: totalIncidents,
+      hourly,
+      peakHour,
+      peakHourCount,
+      peakHourLoadPct,
+      utilizationPct,
+      loadPct,
+      availabilityPct: Math.max(0, 100 - Math.min(100, utilizationPct)),
+      queuedIncidents,
+      queueRiskPct,
+      overlapRiskPct,
+      overlappingIncidents,
+      maxDelayMin: maxDelayHours * 60,
+      avgDelayMin: queuedIncidents > 0 ? (totalDelayHours * 60 / queuedIncidents) : 0,
+      serviceTimeMin: safeServiceMin,
+      busyHours,
+      availableHours,
+      peakConcurrentDemand,
+      riskLevel: loadRiskLevel(loadPct, queueRiskPct)
+    };
   }
 
   // ============ COMPLIANCE METRICS ============
@@ -2156,6 +2247,8 @@
         `Covers: ${s.covered} incident${s.covered === 1 ? '' : 's'}<br>` +
         prioBreakdown +
         (s.peakConcurrent != null ? `Peak concurrent: ${s.peakConcurrent}<br>` : '') +
+        (s.loadMetrics ? `Expected load: ${(s.loadMetrics.loadPct || 0).toFixed(0)}% (${s.loadMetrics.riskLevel || 'Low'})<br>` : '') +
+        (s.loadMetrics ? `Queue risk: ${(s.loadMetrics.queueRiskPct || 0).toFixed(0)}%<br>` : '') +
         `Radius: ${radiusLabel}<br>` +
         (s.serviceTimeMin != null ? `Cycle time: ${s.serviceTimeMin} min<br>` : '') +
         `Overall service level: ${svc}<br>` +
@@ -2202,11 +2295,14 @@
     const totalUnits = stations.reduce((sum, s) => sum + (s.units || 1), 0);
     const totalCovered = stations.reduce((sum, s) => sum + (s.covered || (s.incidentIdx ? s.incidentIdx.length : 0)), 0);
     const allKpi = (100 * overallKpiCompliance(stations, incidents.length)).toFixed(1);
+    const networkLoad = buildNetworkLoadSummary();
+    const allLoadCls = networkLoad.loadPct >= 85 || networkLoad.queueRiskPct >= 10 ? 'hot' : networkLoad.loadPct >= 60 || networkLoad.queueRiskPct >= 3 ? 'warn' : '';
     const allRow = `<button class="station-row ${selectedStationIndex === 'all' ? 'selected' : ''}" type="button" data-station-index="all">
         <span>ALL</span>
         <span><b>All DFR Stations</b><small>Network-wide station stats</small></span>
         <em>${totalCovered}</em>
         <em class="units">x${totalUnits}</em>
+        <em class="load ${allLoadCls}">${networkLoad.loadPct.toFixed(0)}%</em>
         <em class="kpi">${allKpi}%</em>
       </button>`;
     reportList.innerHTML = allRow + stations.map((s, idx) => {
@@ -2214,11 +2310,15 @@
       const units = s.units || 1;
       const siteKpi = ((s.achievedServiceLevel || 0) * 100).toFixed(1);
       const incidentsCovered = s.covered || (s.incidentIdx ? s.incidentIdx.length : 0);
+      const load = s.loadMetrics || {};
+      const loadPct = load.loadPct || 0;
+      const loadCls = loadPct >= 85 || (load.queueRiskPct || 0) >= 10 ? 'hot' : loadPct >= 60 || (load.queueRiskPct || 0) >= 3 ? 'warn' : '';
       return `<button class="station-row ${selectedStationIndex === idx ? 'selected' : ''}" type="button" data-station-index="${idx}">
         <span>${String(idx + 1).padStart(2, '0')}</span>
         <span><b>DFR Station ${String(idx + 1).padStart(2, '0')}</b><small>${coord}</small></span>
         <em>${incidentsCovered}</em>
         <em class="units">x${units}</em>
+        <em class="load ${loadCls}">${loadPct.toFixed(0)}%</em>
         <em class="kpi">${siteKpi}%</em>
       </button>`;
     }).join('');
@@ -2252,6 +2352,94 @@
     }).join('');
   }
 
+  function formatHourLabel(hour) {
+    const h = Math.max(0, Math.min(23, Math.floor(hour || 0)));
+    return String(h).padStart(2, '0') + ':00';
+  }
+
+  function renderLoadRiskBadge(load) {
+    const risk = load && load.riskLevel ? load.riskLevel : 'Low';
+    const cls = risk === 'High' ? 'hot' : risk === 'Medium' ? 'warn' : '';
+    return `<span class="load-risk ${cls}">${risk}</span>`;
+  }
+
+  function renderHourlyLoadBars(load) {
+    const hourly = load && Array.isArray(load.hourly) ? load.hourly : [];
+    if (hourly.length === 0) return '<span class="station-empty">No hourly demand samples</span>';
+    const peak = Math.max(1, ...hourly);
+    return hourly.map((count, hour) => {
+      const h = Math.max(3, Math.round(46 * count / peak));
+      const cls = count === peak && count > 0 ? 'hot' : count >= peak * 0.65 && count > 0 ? 'warn' : '';
+      return `<i class="${cls}" title="${formatHourLabel(hour)} - ${count} incident${count === 1 ? '' : 's'}" style="height:${h}px"></i>`;
+    }).join('');
+  }
+
+  function buildNetworkLoadSummary() {
+    const hourly = new Array(24).fill(0);
+    let busyHours = 0;
+    let availableHours = 0;
+    let queuedIncidents = 0;
+    let overlappingIncidents = 0;
+    let totalDelay = 0;
+    let maxDelay = 0;
+    let expectedIncidents = 0;
+    let peakConcurrentDemand = 0;
+    let weightedPeakLoad = 0;
+    let weightedLoad = 0;
+
+    for (const s of stations) {
+      const load = s.loadMetrics || {};
+      expectedIncidents += load.expectedIncidents || 0;
+      busyHours += load.busyHours || 0;
+      availableHours += load.availableHours || 0;
+      queuedIncidents += load.queuedIncidents || 0;
+      overlappingIncidents += load.overlappingIncidents || 0;
+      totalDelay += (load.avgDelayMin || 0) * (load.queuedIncidents || 0);
+      maxDelay = Math.max(maxDelay, load.maxDelayMin || 0);
+      peakConcurrentDemand = Math.max(peakConcurrentDemand, load.peakConcurrentDemand || 0);
+      weightedPeakLoad += (load.peakHourLoadPct || 0) * Math.max(1, s.units || 1);
+      weightedLoad += (load.loadPct || 0) * Math.max(1, s.units || 1);
+      if (Array.isArray(load.hourly)) {
+        for (let i = 0; i < 24; i++) hourly[i] += load.hourly[i] || 0;
+      }
+    }
+
+    let peakHour = 0;
+    let peakHourCount = 0;
+    for (let i = 0; i < 24; i++) {
+      if (hourly[i] > peakHourCount) {
+        peakHourCount = hourly[i];
+        peakHour = i;
+      }
+    }
+    const totalUnits = stations.reduce((sum, s) => sum + Math.max(1, s.units || 1), 0);
+    const utilizationPct = availableHours > 0 ? Math.min(999, 100 * busyHours / availableHours) : 0;
+    const peakHourLoadPct = totalUnits > 0 ? weightedPeakLoad / totalUnits : 0;
+    const loadPct = totalUnits > 0 ? Math.max(utilizationPct, weightedLoad / totalUnits) : 0;
+    const queueRiskPct = expectedIncidents > 0 ? 100 * queuedIncidents / expectedIncidents : 0;
+    const overlapRiskPct = expectedIncidents > 0 ? 100 * overlappingIncidents / expectedIncidents : 0;
+    return {
+      expectedIncidents,
+      hourly,
+      peakHour,
+      peakHourCount,
+      peakHourLoadPct,
+      utilizationPct,
+      loadPct,
+      availabilityPct: Math.max(0, 100 - Math.min(100, utilizationPct)),
+      queuedIncidents,
+      queueRiskPct,
+      overlapRiskPct,
+      overlappingIncidents,
+      maxDelayMin: maxDelay,
+      avgDelayMin: queuedIncidents > 0 ? totalDelay / queuedIncidents : 0,
+      busyHours,
+      availableHours,
+      peakConcurrentDemand,
+      riskLevel: loadRiskLevel(loadPct, queueRiskPct)
+    };
+  }
+
   function buildAllStationSummary() {
     const responseTimes = stations.flatMap(s => s.responseTimesSec || []);
     const sortedTimes = responseTimes.slice().sort((a, b) => a - b);
@@ -2271,7 +2459,8 @@
       avgResponseSec: sortedTimes.length ? sortedTimes.reduce((sum, value) => sum + value, 0) / sortedTimes.length : 0,
       p95ResponseSec: percentile(sortedTimes, 95),
       achievedServiceLevel: overallKpiCompliance(stations, incidents.length),
-      clusterTotals
+      clusterTotals,
+      loadMetrics: buildNetworkLoadSummary()
     };
   }
 
@@ -2283,6 +2472,7 @@
     const p95 = summary.p95ResponseSec ? Math.round(summary.p95ResponseSec) : 0;
     const kpi = ((summary.achievedServiceLevel || 0) * 100).toFixed(1);
     const total = summary.covered || 0;
+    const load = summary.loadMetrics || {};
     const catRows = incidentCategories.map(cat => {
       const count = summary.clusterTotals[cat.id] || 0;
       if (!count) return '';
@@ -2302,6 +2492,19 @@
         <div class="detail-tile"><span>Average</span><strong style="color:var(--cyan)">${avg}s</strong></div>
         <div class="detail-tile"><span>P95</span><strong>${p95}s</strong></div>
         <div class="detail-tile"><span>KPI</span><strong style="color:var(--ok)">${kpi}%</strong></div>
+        <div class="detail-tile"><span>Expected Load</span><strong class="${(load.loadPct || 0) >= 85 ? 'hot-text' : (load.loadPct || 0) >= 60 ? 'warn-text' : ''}">${(load.loadPct || 0).toFixed(0)}%</strong></div>
+        <div class="detail-tile"><span>Availability</span><strong>${(load.availabilityPct || 0).toFixed(0)}%</strong></div>
+        <div class="detail-tile"><span>Queue Risk</span><strong class="${(load.queueRiskPct || 0) >= 10 ? 'hot-text' : (load.queueRiskPct || 0) >= 3 ? 'warn-text' : ''}">${(load.queueRiskPct || 0).toFixed(0)}%</strong></div>
+      </div>
+      <div class="station-detail-kicker">Operational Load ${renderLoadRiskBadge(load)}</div>
+      <div class="load-panel">
+        <div class="load-bars">${renderHourlyLoadBars(load)}</div>
+        <div class="load-facts">
+          <span>Peak hour <b>${formatHourLabel(load.peakHour)} (${load.peakHourCount || 0})</b></span>
+          <span>Overlap risk <b>${(load.overlapRiskPct || 0).toFixed(0)}%</b></span>
+          <span>Queued <b>${load.queuedIncidents || 0}</b></span>
+          <span>Worst delay <b>${(load.maxDelayMin || 0).toFixed(1)} min</b></span>
+        </div>
       </div>
       <div class="station-detail-kicker">Response Time Distribution (s)</div>
       <div class="response-bars">${renderResponseBars(summary.responseTimesSec)}</div>
@@ -2332,6 +2535,7 @@
     const avg = s.avgResponseSec ? Math.round(s.avgResponseSec) : 0;
     const p95 = s.p95ResponseSec ? Math.round(s.p95ResponseSec) : 0;
     const total = s.covered || (s.incidentIdx ? s.incidentIdx.length : 0);
+    const load = s.loadMetrics || computeStationLoadMetrics((s.incidentIdx || []).map(i => incidents[i]).filter(Boolean), units, s.serviceTimeMin || getKpiParams().serviceTimeMin, getKpiParams().periodHours);
     const catRows = incidentCategories.map((cat, cIdx) => {
       const count = (s.clusterTotals && s.clusterTotals[cat.id]) || 0;
       if (!count) return '';
@@ -2354,6 +2558,21 @@
         <div class="detail-tile"><span>Average</span><strong style="color:var(--cyan)">${avg}s</strong></div>
         <div class="detail-tile"><span>P95</span><strong>${p95}s</strong></div>
         <div class="detail-tile"><span>KPI</span><strong style="color:var(--ok)">${siteKpi}%</strong></div>
+        <div class="detail-tile"><span>Expected Load</span><strong class="${(load.loadPct || 0) >= 85 ? 'hot-text' : (load.loadPct || 0) >= 60 ? 'warn-text' : ''}">${(load.loadPct || 0).toFixed(0)}%</strong></div>
+        <div class="detail-tile"><span>Availability</span><strong>${(load.availabilityPct || 0).toFixed(0)}%</strong></div>
+        <div class="detail-tile"><span>Queue Risk</span><strong class="${(load.queueRiskPct || 0) >= 10 ? 'hot-text' : (load.queueRiskPct || 0) >= 3 ? 'warn-text' : ''}">${(load.queueRiskPct || 0).toFixed(0)}%</strong></div>
+      </div>
+      <div class="station-detail-kicker">Operational Load ${renderLoadRiskBadge(load)}</div>
+      <div class="load-panel">
+        <div class="load-bars">${renderHourlyLoadBars(load)}</div>
+        <div class="load-facts">
+          <span>Expected incidents <b>${load.expectedIncidents || 0}</b></span>
+          <span>Peak hour <b>${formatHourLabel(load.peakHour)} (${load.peakHourCount || 0})</b></span>
+          <span>Overlap risk <b>${(load.overlapRiskPct || 0).toFixed(0)}%</b></span>
+          <span>Queued <b>${load.queuedIncidents || 0}</b></span>
+          <span>Cycle impact <b>${load.serviceTimeMin || s.serviceTimeMin || getKpiParams().serviceTimeMin} min</b></span>
+          <span>Worst delay <b>${(load.maxDelayMin || 0).toFixed(1)} min</b></span>
+        </div>
       </div>
       <div class="station-detail-kicker">Response Time Distribution (s)</div>
       <div class="response-bars">${bars}</div>
@@ -2845,6 +3064,8 @@
 
         let statusText = `<strong>${totalUnits} DroneBox unit${totalUnits === 1 ? '' : 's'}</strong> across ${stations.length} site${stations.length === 1 ? '' : 's'}<br>${pillsHtml}`;
         statusText += `<br>Geographic coverage: ${result.coveragePercent.toFixed(1)}% / ${planning.coverageTargetPct.toFixed(0)}% target`;
+        const networkLoad = buildNetworkLoadSummary();
+        statusText += `<br>Network load: ${networkLoad.loadPct.toFixed(0)}% | queue risk ${networkLoad.queueRiskPct.toFixed(0)}% | peak hour ${formatHourLabel(networkLoad.peakHour)}`;
         if (!result.targetMet) {
           statusText += `<br><span style="color:var(--incident)">Target stopped early: next station would cover fewer than ${planning.minIncidentsPerSite} incident${planning.minIncidentsPerSite === 1 ? '' : 's'}</span>`;
         }
@@ -2984,6 +3205,7 @@
     }
     const kpi = getKpiParams();
     const planning = getPlanningParams();
+    const networkLoad = buildNetworkLoadSummary();
     const totalUnits = stations.reduce((s, x) => s + (x.units || 1), 0);
     const totalShortfall = stations.reduce((s, x) => s + (x.shortfall || 0), 0);
     const activeStep = parseInt((document.getElementById('app') && document.getElementById('app').dataset.step) || '1', 10) || 1;
@@ -3053,7 +3275,12 @@
         sites: stations.length,
         total_dronebox_units: totalUnits,
         shortfall_units: totalShortfall,
-        kpi_compliance_pct: 100 * overallKpiCompliance(stations, incidents.length)
+        kpi_compliance_pct: 100 * overallKpiCompliance(stations, incidents.length),
+        network_load_pct: networkLoad.loadPct,
+        network_availability_pct: networkLoad.availabilityPct,
+        network_queue_risk_pct: networkLoad.queueRiskPct,
+        network_peak_hour: networkLoad.peakHour,
+        network_peak_hour_incidents: networkLoad.peakHourCount
       },
       area: areaPolygon ? {
         type: 'Polygon',
@@ -3089,7 +3316,8 @@
         achievedByPriority: s.achievedByPriority || {},
         clusterTotals: s.clusterTotals || {},
         priorityShortfall: s.priorityShortfall || {},
-        avgResponseSec: s.avgResponseSec
+        avgResponseSec: s.avgResponseSec,
+        loadMetrics: s.loadMetrics || {}
       })),
       sites: stations.map((s, idx) => ({
         id: idx + 1,
@@ -3102,6 +3330,14 @@
         units_allocated: s.units,
         shortfall: s.shortfall || 0,
         peak_concurrent: s.peakConcurrent,
+        expected_load_pct: s.loadMetrics ? s.loadMetrics.loadPct : 0,
+        availability_pct: s.loadMetrics ? s.loadMetrics.availabilityPct : 0,
+        peak_hour: s.loadMetrics ? s.loadMetrics.peakHour : null,
+        peak_hour_incidents: s.loadMetrics ? s.loadMetrics.peakHourCount : 0,
+        overlap_risk_pct: s.loadMetrics ? s.loadMetrics.overlapRiskPct : 0,
+        queue_risk_pct: s.loadMetrics ? s.loadMetrics.queueRiskPct : 0,
+        queued_incidents: s.loadMetrics ? s.loadMetrics.queuedIncidents : 0,
+        max_queue_delay_min: s.loadMetrics ? s.loadMetrics.maxDelayMin : 0,
         service_level_achieved: s.achievedServiceLevel,
         per_category: incidentCategories.map(cat => ({
           id: cat.id,
@@ -4629,7 +4865,8 @@
         accent:     [220, 230, 239],
         accentDim:  [142, 164, 183],
         coverage:   [159, 180, 200],
-        incident:   [227, 139, 149]
+        incident:   [227, 139, 149],
+        amber:      [232, 167, 68]
       };
       function fill(c) { pdf.setFillColor(c[0], c[1], c[2]); }
       function stroke(c) { pdf.setDrawColor(c[0], c[1], c[2]); }
@@ -4666,6 +4903,7 @@
       const kpi = getKpiParams();
       const planning = getPlanningParams();
       const totalUnits = stations.reduce((s, x) => s + (x.units || 1), 0);
+      const networkLoad = buildNetworkLoadSummary();
       const totalShortfall = stations.reduce((s, x) => s + (x.shortfall || 0), 0);
       const kpiCompliance = overallKpiCompliance(stations, incidents.length) * 100;
       // Geographic coverage
@@ -4762,7 +5000,7 @@
         const t = (prioTargetsForPdf[cat.id] || 0) * 100;
         return `${cat.name.substring(0,8)} ${cat.kpiSec}s/${t.toFixed(0)}%`;
       }).join(' · ');
-      const profileLine = `Categories: ${targetsStr} | Window: ${windowLabel} | Service Time: ${kpi.serviceTimeMin}min | Geo Target: ${planning.coverageTargetPct.toFixed(0)}% | Min/Site: ${planning.minIncidentsPerSite} | Area: ${formatArea(areaKm2)} | Incidents: ${incidents.length} | No-Fly: ${noFlyZones.length} | No-Deploy: ${noDeployZones.length} | Water: ${waterZones.length}`;
+      const profileLine = `Categories: ${targetsStr} | Window: ${windowLabel} | Service Time: ${kpi.serviceTimeMin}min | Load: ${networkLoad.loadPct.toFixed(0)}% | Queue: ${networkLoad.queueRiskPct.toFixed(0)}% | Geo Target: ${planning.coverageTargetPct.toFixed(0)}% | Min/Site: ${planning.minIncidentsPerSite} | Area: ${formatArea(areaKm2)} | Incidents: ${incidents.length} | No-Fly: ${noFlyZones.length} | No-Deploy: ${noDeployZones.length} | Water: ${waterZones.length}`;
       pdf.text(profileLine, M, y);
       text(T.text);
       y += 4;
@@ -4866,6 +5104,7 @@
         { key: 'inc', label: 'Incidents', w: 14 },
         { key: 'mix', label: mixHeader, w: 24 },
         { key: 'units', label: 'Units', w: 12 },
+        { key: 'load', label: 'Load', w: 14 },
         { key: 'svc', label: 'KPI', w: 16 },
         { key: 'status', label: 'Status', w: 18 }
       ];
@@ -4914,12 +5153,15 @@
           String(s.covered),
           mixStr,
           '×' + (s.units || 1),
+          s.loadMetrics ? (s.loadMetrics.loadPct || 0).toFixed(0) + '%' : '0%',
           svc,
           status
         ];
         cells.forEach((val, ci) => {
           if (cols[ci].key === 'status' && status !== 'OK') {
             text(T.incident);
+          } else if (cols[ci].key === 'load' && s.loadMetrics && ((s.loadMetrics.loadPct || 0) >= 60 || (s.loadMetrics.queueRiskPct || 0) >= 3)) {
+            text((s.loadMetrics.loadPct || 0) >= 85 || (s.loadMetrics.queueRiskPct || 0) >= 10 ? T.incident : T.amber);
           } else if (cols[ci].key === 'mix' && topCount > 0) {
             text(T.incident);
           } else {
@@ -5016,7 +5258,7 @@
       document.getElementById('m-units').textContent = totalUnits;
       document.getElementById('m-coverage').innerHTML = coveragePct.toFixed(1) + '<span class="metric-unit">%</span>';
       document.getElementById('m-kpi').innerHTML = kpiCompliance.toFixed(1) + '<span class="metric-unit">%</span>';
-      document.getElementById('status3').innerHTML = `<strong>${totalUnits} DroneBox unit${totalUnits === 1 ? '' : 's'}</strong> across ${stations.length} site${stations.length === 1 ? '' : 's'}`;
+      document.getElementById('status3').innerHTML = `<strong>${totalUnits} DroneBox unit${totalUnits === 1 ? '' : 's'}</strong> across ${stations.length} site${stations.length === 1 ? '' : 's'}<br>Network load: ${networkLoad.loadPct.toFixed(0)}% | queue risk ${networkLoad.queueRiskPct.toFixed(0)}%`;
       document.getElementById('status3').classList.add('good');
       window.__lastCurve = computeMarginalCurves(stations, incidents);
       renderSaturationCurves(window.__lastCurve);
@@ -5130,8 +5372,19 @@
       units: s.units != null ? s.units : s.units_allocated,
       unitsRequired: s.unitsRequired != null ? s.unitsRequired : s.units_required,
       achievedServiceLevel: s.achievedServiceLevel != null ? s.achievedServiceLevel : s.service_level_achieved,
-      incidentIdx: Array.isArray(s.incidentIdx) ? s.incidentIdx.slice() : []
+      incidentIdx: Array.isArray(s.incidentIdx) ? s.incidentIdx.slice() : [],
+      loadMetrics: s.loadMetrics || s.load_metrics || null
     })).filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lng));
+
+    for (const s of stations) {
+      const cluster = (s.incidentIdx || []).map(idx => incidents[idx]).filter(Boolean);
+      s.loadMetrics = computeStationLoadMetrics(
+        cluster,
+        s.units || 1,
+        s.serviceTimeMin || profile.service_time_min || getKpiParams().serviceTimeMin,
+        profile.incident_period_h || getKpiParams().periodHours
+      );
+    }
 
     updateLocalizationLabels();
     updateRadius();

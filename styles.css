@@ -1515,7 +1515,7 @@ input {
 .station-row {
   width: 100%;
   display: grid;
-  grid-template-columns: 28px 1fr 48px 48px 52px;
+  grid-template-columns: 28px 1fr 42px 42px 44px 48px;
   gap: 8px;
   align-items: center;
   padding: 10px 12px;
@@ -1557,6 +1557,11 @@ input {
 }
 .station-row .units { color: var(--cyan); font-weight: 700; }
 .station-row .kpi { color: var(--ok); font-weight: 700; }
+.station-row .load { color: var(--ok); font-weight: 700; }
+.station-row .load.warn { color: var(--amber); }
+.station-row .load.hot { color: var(--critical); }
+.warn-text { color: var(--amber) !important; }
+.hot-text { color: var(--critical) !important; }
 .station-detail {
   margin-top: 12px;
   border: 1px solid var(--border);
@@ -1630,6 +1635,60 @@ input {
 }
 .response-bars i.warn { background: var(--amber); }
 .response-bars i.hot { background: var(--critical); }
+.load-panel {
+  margin: 8px 0 14px;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  padding: 8px 0;
+}
+.load-risk {
+  display: inline-flex;
+  margin-left: 6px;
+  padding: 2px 6px;
+  border: 1px solid rgba(124,232,180,0.36);
+  color: var(--ok);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+}
+.load-risk.warn {
+  border-color: var(--amber-dim);
+  color: var(--amber);
+}
+.load-risk.hot {
+  border-color: var(--critical-dim);
+  color: var(--critical);
+}
+.load-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 50px;
+  margin-bottom: 8px;
+}
+.load-bars i {
+  flex: 1;
+  min-width: 3px;
+  background: var(--ok);
+  opacity: 0.85;
+}
+.load-bars i.warn { background: var(--amber); }
+.load-bars i.hot { background: var(--critical); }
+.load-facts {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 5px 10px;
+}
+.load-facts span {
+  color: var(--text-2);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.load-facts b {
+  color: var(--text-0);
+  font-weight: 700;
+}
 .demand-mix {
   display: grid;
   grid-template-columns: 84px 1fr;
