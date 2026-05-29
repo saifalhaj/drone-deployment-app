@@ -447,6 +447,54 @@
  <span class="panel-title">Compute Deployment</span>
  </div>
  <p class="help">Runs the time-aware optimizer using your Mission and Toolkit settings, area, and incident pattern. Stations are sized to handle observed concurrent demand - not just average load.</p>
+ <div class="subsection-label">Planning Mode</div>
+ <div class="mode-tabs planning-mode-tabs" role="group" aria-label="Planning mode">
+ <button class="mode-tab active" type="button" data-planning-mode="smoothed-growth">Smoothed Demand</button>
+ <button class="mode-tab" type="button" data-planning-mode="direct-fit">Direct Fit</button>
+ </div>
+ <div class="status-line" id="directFitWarning" style="display:none;">Direct Fit places stations around the exact incidents loaded in this session. It is useful for forensic review, fixed-event planning, and explaining how a known historical period would have been covered. It is not suitable for procurement planning or annual deployment sizing because it can overfit isolated calls, missing records, and random historical noise. For station investment decisions, use Smoothed Demand + Growth or Monte Carlo.</div>
+ <div id="smoothedGrowthPanel">
+ <div class="field">
+ <label class="field-label">Demand Growth Scenario</label>
+ <select id="growthMultiplier">
+ <option value="1">+0% volume</option>
+ <option value="1.25">+25% volume</option>
+ <option value="1.5">+50% volume</option>
+ <option value="2">+100% volume</option>
+ </select>
+ <div class="field-desc">Scales load and unit sizing; station placement stays based on current demand pattern</div>
+ </div>
+ <details class="advanced-settings" id="smoothedAdvanced">
+ <summary>Advanced planning settings</summary>
+ <div class="field-row" style="margin-top: 10px;">
+ <div class="field">
+ <label class="field-label">Smoothing Radius</label>
+ <select id="kdeBandwidthMode">
+ <option value="auto-silverman">Auto Silverman</option>
+ <option value="manual">Manual meters</option>
+ </select>
+ </div>
+ <div class="field">
+ <label class="field-label">Manual Radius (m)</label>
+ <input type="number" id="kdeBandwidthMeters" value="1000" min="100" step="50" disabled>
+ </div>
+ </div>
+ <div class="field-row">
+ <div class="field">
+ <label class="field-label">Grid Resolution</label>
+ <select id="kdeGridResolution">
+ <option value="80">80 x 80</option>
+ <option value="100" selected>100 x 100</option>
+ <option value="150">150 x 150</option>
+ </select>
+ </div>
+ <div class="field">
+ <label class="field-label">Ignore Low-Demand Cells (%)</label>
+ <input type="number" id="kdeDemandThreshold" value="1" min="0" max="25" step="0.5">
+ </div>
+ </div>
+ </details>
+ </div>
  <div class="subsection-label">Planning Realism</div>
  <div class="field-row">
  <div class="field">

@@ -106,6 +106,9 @@
   let heatmapHourFilter = 'all';
   let heatmapMonthFilter = 'all';
   let lastIncidentCoverage = null;
+  let lastDemandGrid = null;
+  let lastPlanningResultMeta = null;
+  let modeResultCache = {};
 
   // ============ PLANNING MODE SCAFFOLD ============
   const SAVED_PLAN_VERSION = 2;
@@ -117,7 +120,7 @@
 
   function createDefaultPlanningModeState() {
     return {
-      mode: PLANNING_MODE.DIRECT_FIT,
+      mode: PLANNING_MODE.SMOOTHED_GROWTH,
       directFit: {
         coverageTargetPct: 90,
         minIncidentsPerSite: 2,
@@ -164,7 +167,11 @@
     if (!plan || typeof plan !== 'object') return plan;
     const normalized = { ...plan };
     normalized.version = Number(normalized.version || 1);
-    normalized.planningModeState = mergePlanningModeState(normalized.planningModeState);
+    if (!normalized.planningModeState && normalized.version < SAVED_PLAN_VERSION) {
+      normalized.planningModeState = mergePlanningModeState({ mode: PLANNING_MODE.DIRECT_FIT });
+    } else {
+      normalized.planningModeState = mergePlanningModeState(normalized.planningModeState);
+    }
     return normalized;
   }
 
@@ -675,10 +682,271 @@
     };
   }
 
+  function getSelectedPlanningMode() {
+    return planningModeState.mode || PLANNING_MODE.SMOOTHED_GROWTH;
+  }
+
+  function modeLabel(mode) {
+    if (mode === PLANNING_MODE.DIRECT_FIT) return 'Direct Fit';
+    if (mode === PLANNING_MODE.MONTE_CARLO) return 'Monte Carlo';
+    return 'Smoothed Demand + Growth';
+  }
+
+  function getSmoothedGrowthSettings() {
+    const defaults = createDefaultPlanningModeState().smoothedGrowth;
+    const state = { ...defaults, ...(planningModeState.smoothedGrowth || {}) };
+    const growthEl = document.getElementById('growthMultiplier');
+    const bandwidthModeEl = document.getElementById('kdeBandwidthMode');
+    const bandwidthEl = document.getElementById('kdeBandwidthMeters');
+    const gridEl = document.getElementById('kdeGridResolution');
+    const thresholdEl = document.getElementById('kdeDemandThreshold');
+    const growthMultiplier = Math.max(1, parseFloat(growthEl && growthEl.value) || state.growthMultiplier || 1);
+    const bandwidthMode = bandwidthModeEl && bandwidthModeEl.value === 'manual' ? 'manual' : 'auto-silverman';
+    const manualBandwidth = parseFloat(bandwidthEl && bandwidthEl.value);
+    return {
+      ...state,
+      gridResolution: Math.max(20, Math.min(200, Math.floor(parseFloat(gridEl && gridEl.value) || state.gridResolution || 100))),
+      bandwidthMode,
+      bandwidthMeters: bandwidthMode === 'manual' && Number.isFinite(manualBandwidth) && manualBandwidth > 0 ? manualBandwidth : null,
+      growthMultiplier,
+      demandThresholdPct: Math.max(0, Math.min(25, parseFloat(thresholdEl && thresholdEl.value) || state.demandThresholdPct || 1)),
+      useCategoryWeights: true
+    };
+  }
+
+  function syncPlanningModeStateFromControls() {
+    const planning = getPlanningParams();
+    planningModeState = mergePlanningModeState({
+      ...planningModeState,
+      mode: getSelectedPlanningMode(),
+      directFit: {
+        ...planningModeState.directFit,
+        coverageTargetPct: planning.coverageTargetPct,
+        minIncidentsPerSite: planning.minIncidentsPerSite
+      },
+      smoothedGrowth: getSmoothedGrowthSettings()
+    });
+  }
+
+  function setPlanningMode(mode, opts) {
+    opts = opts || {};
+    if (!Object.values(PLANNING_MODE).includes(mode) || mode === PLANNING_MODE.MONTE_CARLO) mode = PLANNING_MODE.SMOOTHED_GROWTH;
+    const previous = planningModeState.mode;
+    if (previous === mode && !opts.force) return;
+    if (!opts.silent) cacheCurrentPlanningResult();
+    planningModeState = mergePlanningModeState({ ...planningModeState, mode });
+    document.querySelectorAll('.mode-tab[data-planning-mode]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.planningMode === mode);
+    });
+    const smoothedPanel = document.getElementById('smoothedGrowthPanel');
+    const warning = document.getElementById('directFitWarning');
+    if (smoothedPanel) smoothedPanel.style.display = mode === PLANNING_MODE.SMOOTHED_GROWTH ? 'block' : 'none';
+    if (warning) warning.style.display = mode === PLANNING_MODE.DIRECT_FIT ? 'block' : 'none';
+    if (!opts.silent && previous !== mode) {
+      if (!restorePlanningResult(mode)) clearRenderedDeployment();
+    }
+    refreshHeatmap();
+  }
+
+  function syncPlanningModeControls() {
+    const state = mergePlanningModeState(planningModeState);
+    planningModeState = state;
+    const sm = state.smoothedGrowth || {};
+    setInputValue('growthMultiplier', sm.growthMultiplier || 1);
+    setInputValue('kdeBandwidthMode', sm.bandwidthMode || 'auto-silverman');
+    setInputValue('kdeBandwidthMeters', sm.bandwidthMeters || 1000);
+    setInputValue('kdeGridResolution', sm.gridResolution || 100);
+    setInputValue('kdeDemandThreshold', sm.demandThresholdPct == null ? 1 : sm.demandThresholdPct);
+    const manual = document.getElementById('kdeBandwidthMeters');
+    if (manual) manual.disabled = (sm.bandwidthMode || 'auto-silverman') !== 'manual';
+    document.querySelectorAll('.mode-tab[data-planning-mode]').forEach(btn => {
+      btn.onclick = () => setPlanningMode(btn.dataset.planningMode);
+    });
+    ['growthMultiplier', 'kdeBandwidthMode', 'kdeBandwidthMeters', 'kdeGridResolution', 'kdeDemandThreshold'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.onchange = function() {
+        if (id === 'kdeBandwidthMode') {
+          const manualInput = document.getElementById('kdeBandwidthMeters');
+          if (manualInput) manualInput.disabled = this.value !== 'manual';
+        }
+        syncPlanningModeStateFromControls();
+        if (getSelectedPlanningMode() === PLANNING_MODE.SMOOTHED_GROWTH) clearRenderedDeployment();
+      };
+    });
+    setPlanningMode(state.mode, { silent: true, force: true });
+  }
+
   function requiredCoverageCount(totalIncidents, planning) {
     if (totalIncidents <= 0) return 0;
     const target = planning && planning.coverageTarget != null ? planning.coverageTarget : 1;
     return Math.min(totalIncidents, Math.ceil(totalIncidents * target));
+  }
+
+  function areaBoundsPlain() {
+    if (!areaPolygon) return null;
+    const b = areaPolygon.getBounds();
+    return {
+      minLat: b.getSouth(),
+      maxLat: b.getNorth(),
+      minLng: b.getWest(),
+      maxLng: b.getEast()
+    };
+  }
+
+  function metersPerDegreeAt(lat) {
+    const latRad = lat * Math.PI / 180;
+    return {
+      lat: 111320,
+      lng: Math.max(1, 111320 * Math.cos(latRad))
+    };
+  }
+
+  function demandDistanceMeters(a, b, scale) {
+    const dx = (a.lng - b.lng) * scale.lng;
+    const dy = (a.lat - b.lat) * scale.lat;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function selectKdeBandwidthMeters(sourceIncidents, bounds, resolution, settings) {
+    const centerLat = (bounds.minLat + bounds.maxLat) / 2;
+    const centerLng = (bounds.minLng + bounds.maxLng) / 2;
+    const scale = metersPerDegreeAt(centerLat);
+    const widthM = Math.max(1, (bounds.maxLng - bounds.minLng) * scale.lng);
+    const heightM = Math.max(1, (bounds.maxLat - bounds.minLat) * scale.lat);
+    const diagonalM = Math.sqrt(widthM * widthM + heightM * heightM);
+    const cellDiagonalM = Math.sqrt((widthM / resolution) ** 2 + (heightM / resolution) ** 2);
+    const minBandwidth = Math.max(300, 1.5 * cellDiagonalM);
+    const maxBandwidth = Math.max(minBandwidth, diagonalM * 0.25);
+    if (settings.bandwidthMode === 'manual' && settings.bandwidthMeters) {
+      return Math.max(minBandwidth, Math.min(maxBandwidth, settings.bandwidthMeters));
+    }
+    const n = sourceIncidents.length;
+    if (n < 2) return minBandwidth;
+    const points = sourceIncidents.map(inc => ({
+      x: (inc.lng - centerLng) * scale.lng,
+      y: (inc.lat - centerLat) * scale.lat
+    }));
+    const meanX = points.reduce((s, p) => s + p.x, 0) / n;
+    const meanY = points.reduce((s, p) => s + p.y, 0) / n;
+    const radial = points.map(p => Math.sqrt((p.x - meanX) ** 2 + (p.y - meanY) ** 2)).sort((a, b) => a - b);
+    const meanR = radial.reduce((s, v) => s + v, 0) / n;
+    const variance = radial.reduce((s, v) => s + (v - meanR) ** 2, 0) / Math.max(1, n - 1);
+    const stdDistance = Math.sqrt(variance);
+    const q1 = radial[Math.floor((n - 1) * 0.25)] || 0;
+    const q3 = radial[Math.floor((n - 1) * 0.75)] || 0;
+    const iqrDistance = q3 - q1;
+    const sigma = Math.max(1, Math.min(stdDistance || iqrDistance || minBandwidth, (iqrDistance || stdDistance || minBandwidth) / 1.34));
+    const silverman = 1.06 * sigma * Math.pow(n, -0.2);
+    return Math.max(minBandwidth, Math.min(maxBandwidth, silverman));
+  }
+
+  function buildDemandGrid(sourceIncidents, settings) {
+    if (!areaPolygon) throw new Error('Define an operational area before computing smoothed demand.');
+    if (!Array.isArray(sourceIncidents) || sourceIncidents.length === 0) {
+      throw new Error('Smoothed Demand needs incident data. Load an incident file or generate incidents first.');
+    }
+    const bounds = areaBoundsPlain();
+    const resolution = settings.gridResolution || 100;
+    const centerLat = (bounds.minLat + bounds.maxLat) / 2;
+    const scale = metersPerDegreeAt(centerLat);
+    const bandwidthM = selectKdeBandwidthMeters(sourceIncidents, bounds, resolution, settings);
+    const bwSq2 = 2 * bandwidthM * bandwidthM;
+    const latStep = (bounds.maxLat - bounds.minLat) / resolution;
+    const lngStep = (bounds.maxLng - bounds.minLng) / resolution;
+    const active = [];
+    let maxWeight = 0;
+    let totalRawWeight = 0;
+
+    for (let row = 0; row < resolution; row++) {
+      const lat = bounds.minLat + (row + 0.5) * latStep;
+      for (let col = 0; col < resolution; col++) {
+        const lng = bounds.minLng + (col + 0.5) * lngStep;
+        const cellPoint = { lat, lng };
+        if (!isValidLocation(cellPoint)) continue;
+        const categoryWeights = {};
+        let cellWeight = 0;
+        for (const inc of sourceIncidents) {
+          const d = demandDistanceMeters(cellPoint, inc, scale);
+          if (d > bandwidthM * 3) continue;
+          const cat = getCategoryById(inc.priority);
+          const categoryWeight = Number(cat.weight) || 1;
+          const contribution = categoryWeight * Math.exp(-(d * d) / bwSq2);
+          cellWeight += contribution;
+          categoryWeights[cat.id] = (categoryWeights[cat.id] || 0) + contribution;
+        }
+        if (cellWeight <= 0) continue;
+        const cell = {
+          id: `${row}:${col}`,
+          row,
+          col,
+          lat,
+          lng,
+          weight: cellWeight,
+          normalizedWeight: 0,
+          categoryWeights
+        };
+        active.push(cell);
+        maxWeight = Math.max(maxWeight, cellWeight);
+      }
+    }
+
+    const threshold = maxWeight * ((settings.demandThresholdPct || 0) / 100);
+    const kept = active.filter(cell => cell.weight >= threshold);
+    totalRawWeight = kept.reduce((s, cell) => s + cell.weight, 0);
+    for (const cell of kept) cell.normalizedWeight = totalRawWeight > 0 ? cell.weight / totalRawWeight : 0;
+    return {
+      resolution,
+      bounds,
+      latStep,
+      lngStep,
+      bandwidthMeters: bandwidthM,
+      demandThresholdPct: settings.demandThresholdPct || 0,
+      activeCells: kept,
+      droppedCells: active.length - kept.length,
+      totalRawWeight,
+      maxWeight,
+      incidentCount: sourceIncidents.length
+    };
+  }
+
+  function dominantCategoryId(categoryWeights) {
+    let bestId = getDefaultCategoryId();
+    let bestWeight = -1;
+    for (const cat of incidentCategories) {
+      const w = categoryWeights && categoryWeights[cat.id] ? categoryWeights[cat.id] : 0;
+      if (w > bestWeight) {
+        bestId = cat.id;
+        bestWeight = w;
+      }
+    }
+    return bestId;
+  }
+
+  function demandGridToPoints(grid) {
+    return (grid.activeCells || []).map(cell => ({
+      lat: cell.lat,
+      lng: cell.lng,
+      t: 0,
+      priority: dominantCategoryId(cell.categoryWeights),
+      weight: cell.normalizedWeight,
+      rawWeight: cell.weight,
+      source: 'grid-cell',
+      cellId: cell.id,
+      cell
+    }));
+  }
+
+  function effectiveDemandUnits(settings) {
+    if (incidents.length > 0) return incidents.length;
+    const syntheticVolume = Number(settings && settings.syntheticDemandVolume);
+    if (Number.isFinite(syntheticVolume) && syntheticVolume > 0) return syntheticVolume;
+    throw new Error('Smoothed Demand needs incident data. Load an incident file or generate incidents first.');
+  }
+
+  function weightedMarginalShare(planning, settings) {
+    const units = effectiveDemandUnits(settings);
+    return Math.min(0.05, Math.max(0.005, (planning.minIncidentsPerSite || 2) / Math.max(100, units)));
   }
 
   // Erlang B: probability of blocking (no server free) given c servers and rho Erlangs of traffic
@@ -2026,6 +2294,266 @@
     };
   }
 
+  function greedyWeightedDemandCoverage(demandPoints, radius, planning, settings, typeOptions) {
+    const n = demandPoints.length;
+    const covered = new Array(n).fill(false);
+    const totalWeight = demandPoints.reduce((s, p) => s + (Number(p.weight) || 0), 0);
+    if (n === 0 || totalWeight <= 0) {
+      return { stations: [], covered, coveragePercent: 0, targetMet: false, demandWeightCovered: 0, totalDemandWeight: 0 };
+    }
+    planning = planning || getPlanningParams();
+    const targetWeight = Math.min(totalWeight, totalWeight * (planning.coverageTarget || 0.9));
+    const minMarginal = weightedMarginalShare(planning, settings);
+    const stations = [];
+    let coveredWeight = 0;
+    const inventory = Array.isArray(typeOptions) ? typeOptions.map(t => ({
+      id: t.id,
+      name: t.name,
+      radius: parseFloat(t.radius) || radius,
+      speedKmh: parseFloat(t.speedKmh) || 60,
+      serviceTimeMin: parseFloat(t.serviceTimeMin) || 15,
+      color: t.color,
+      total: parseInt(t.count) || 0,
+      remaining: parseInt(t.count) || 0
+    })).filter(t => t.radius > 0 && t.total > 0) : null;
+    const canUseInventory = inventory && inventory.length > 0;
+
+    const speedMs = inputSpeedToMs(document.getElementById('droneSpeed').value) || 15;
+    const hasNoFly = noFlyZones.length > 0;
+    const standoff = demandPoints.map(p => hasNoFly ? standoffPoint(p) : p);
+    const candidateOk = demandPoints.map(p => canDeployStation(p));
+
+    function radiusFor(point, type) {
+      const cat = getCategoryById(point.priority);
+      const speed = type ? ((Number(type.speedKmh) || 60) / 3.6) : speedMs;
+      const categoryRadius = speed * effectiveFlyTimeSec(cat);
+      return type ? Math.min(Number(type.radius) || categoryRadius, categoryRadius) : categoryRadius;
+    }
+
+    function candidateSetFor(candidateIdx, type, originPoint) {
+      const out = [];
+      let weight = 0;
+      for (let j = 0; j < n; j++) {
+        if (covered[j]) continue;
+        const r = radiusFor(demandPoints[j], type);
+        if (haversine(originPoint, standoff[j]) > r) continue;
+        if (hasNoFly && flightPathBlocked(originPoint, standoff[j])) continue;
+        out.push(j);
+        weight += Number(demandPoints[j].weight) || 0;
+      }
+      return { set: out, weight };
+    }
+
+    while (coveredWeight < targetWeight) {
+      const availableTypes = canUseInventory ? inventory.filter(t => t.remaining > 0) : [null];
+      if (availableTypes.length === 0) break;
+      let best = { idx: -1, type: null, set: [], weight: 0 };
+      for (const type of availableTypes) {
+        for (let i = 0; i < n; i++) {
+          if (!candidateOk[i]) continue;
+          const candidate = candidateSetFor(i, type, demandPoints[i]);
+          if (candidate.weight > best.weight || (candidate.weight === best.weight && candidate.set.length > best.set.length)) {
+            best = { idx: i, type, set: candidate.set, weight: candidate.weight };
+          }
+        }
+      }
+      if (best.idx < 0 || best.set.length === 0 || best.weight <= 0) break;
+      if ((best.weight / totalWeight) < minMarginal) break;
+
+      let cLat = 0, cLng = 0, cWeight = 0;
+      for (const j of best.set) {
+        const w = Number(demandPoints[j].weight) || 0;
+        cLat += demandPoints[j].lat * w;
+        cLng += demandPoints[j].lng * w;
+        cWeight += w;
+      }
+      const centroidPoint = cWeight > 0 ? { lat: cLat / cWeight, lng: cLng / cWeight } : demandPoints[best.idx];
+      const centroidViable = canDeployStation(centroidPoint);
+      const centroid = centroidViable ? candidateSetFor(best.idx, best.type, centroidPoint) : { set: [], weight: 0 };
+      const finalLoc = centroidViable && centroid.weight >= best.weight ? centroidPoint : demandPoints[best.idx];
+      const finalSet = centroidViable && centroid.weight >= best.weight ? centroid.set : best.set;
+      const finalWeight = centroidViable && centroid.weight >= best.weight ? centroid.weight : best.weight;
+      const nominalRadius = best.type ? best.type.radius : Math.max(radius || 0, ...finalSet.map(j => radiusFor(demandPoints[j], null)));
+      stations.push({
+        lat: finalLoc.lat,
+        lng: finalLoc.lng,
+        covered: finalSet.length,
+        incidentIdx: finalSet.slice(),
+        demandIdx: finalSet.slice(),
+        demandWeight: finalWeight,
+        radius: nominalRadius,
+        color: best.type ? best.type.color : '#dce6ef',
+        typeName: best.type ? best.type.name : 'DFR Station',
+        typeId: best.type ? best.type.id : undefined,
+        speedKmh: best.type ? best.type.speedKmh : undefined,
+        serviceTimeMin: best.type ? best.type.serviceTimeMin : undefined
+      });
+      if (best.type) best.type.remaining--;
+      for (const j of finalSet) {
+        if (!covered[j]) {
+          covered[j] = true;
+          coveredWeight += Number(demandPoints[j].weight) || 0;
+        }
+      }
+    }
+
+    const inventoryUsed = canUseInventory ? inventory.map(t => ({ name: t.name, used: t.total - t.remaining, total: t.total })) : null;
+    const remainingByType = {};
+    if (canUseInventory) for (const t of inventory) remainingByType[t.id] = t.remaining;
+    return {
+      stations,
+      covered,
+      coveragePercent: 100 * coveredWeight / totalWeight,
+      targetCoveragePercent: planning.coverageTargetPct,
+      minMarginalShare: minMarginal,
+      demandWeightCovered: coveredWeight,
+      totalDemandWeight: totalWeight,
+      targetMet: coveredWeight >= targetWeight,
+      inventoryUsed,
+      remainingByType
+    };
+  }
+
+  function chooseWeightedIndex(items, weightFn) {
+    let total = 0;
+    for (let i = 0; i < items.length; i++) total += Math.max(0, weightFn(items[i], i));
+    if (total <= 0) return Math.floor(Math.random() * items.length);
+    let r = Math.random() * total;
+    for (let i = 0; i < items.length; i++) {
+      r -= Math.max(0, weightFn(items[i], i));
+      if (r <= 0) return i;
+    }
+    return items.length - 1;
+  }
+
+  function buildSmoothedTemporalTrace(stationsForTrace, demandPoints, grid, settings) {
+    const units = effectiveDemandUnits(settings);
+    const growthMultiplier = Math.max(1, settings.growthMultiplier || 1);
+    const totalSamples = Math.max(1, Math.round(units * growthMultiplier));
+    const centerLat = (grid.bounds.minLat + grid.bounds.maxLat) / 2;
+    const scale = metersPerDegreeAt(centerLat);
+    const bandwidthM = grid.bandwidthMeters || 1000;
+    const bwSq2 = 2 * bandwidthM * bandwidthM;
+    const trace = [];
+    const defaultCategoryId = getDefaultCategoryId();
+
+    function nearbySources(cellPoint) {
+      const out = [];
+      for (const inc of incidents) {
+        const d = demandDistanceMeters(cellPoint, inc, scale);
+        if (d <= bandwidthM * 3) out.push({ inc, weight: Math.exp(-(d * d) / bwSq2) });
+      }
+      return out;
+    }
+
+    for (const site of stationsForTrace) {
+      const demandIdx = Array.isArray(site.demandIdx) ? site.demandIdx : (site.incidentIdx || []);
+      const siteTraceIdx = [];
+      let fractionalCarry = 0;
+      for (const idx of demandIdx) {
+        const point = demandPoints[idx];
+        if (!point) continue;
+        const exactCount = (Number(point.weight) || 0) * totalSamples + fractionalCarry;
+        const sampleCount = Math.floor(exactCount);
+        fractionalCarry = exactCount - sampleCount;
+        const nearby = nearbySources(point);
+        for (let k = 0; k < sampleCount; k++) {
+          let src;
+          if (nearby.length > 0) {
+            src = nearby[chooseWeightedIndex(nearby, x => x.weight)].inc;
+          } else if (incidents.length > 0) {
+            src = incidents[chooseWeightedIndex(incidents, inc => {
+              const catBoost = inc.priority === point.priority ? 2 : 1;
+              return catBoost;
+            })];
+          }
+          const synthetic = {
+            lat: point.lat,
+            lng: point.lng,
+            t: src ? Number(src.t || 0) : Math.random() * getKpiParams().periodHours,
+            timestamp: src ? src.timestamp : null,
+            priority: point.priority || (src && src.priority) || defaultCategoryId,
+            source: 'smoothed-trace',
+            cellId: point.cellId
+          };
+          siteTraceIdx.push(trace.length);
+          trace.push(synthetic);
+        }
+      }
+      if (siteTraceIdx.length === 0 && demandIdx.length > 0) {
+        const point = demandPoints[demandIdx[0]];
+        const src = incidents.length ? incidents[chooseWeightedIndex(incidents, () => 1)] : null;
+        siteTraceIdx.push(trace.length);
+        trace.push({
+          lat: point.lat,
+          lng: point.lng,
+          t: src ? Number(src.t || 0) : 0,
+          timestamp: src ? src.timestamp : null,
+          priority: point.priority || defaultCategoryId,
+          source: 'smoothed-trace',
+          cellId: point.cellId
+        });
+      }
+      site.baselineCovered = demandIdx.length;
+      site.covered = siteTraceIdx.length;
+      site.incidentIdx = siteTraceIdx;
+    }
+
+    return trace;
+  }
+
+  function historicalCoverageByStations(siteList, sourceIncidents) {
+    const covered = new Array(sourceIncidents.length).fill(false);
+    const hasNoFly = noFlyZones.length > 0;
+    for (let i = 0; i < sourceIncidents.length; i++) {
+      const inc = sourceIncidents[i];
+      const target = hasNoFly ? standoffPoint(inc) : inc;
+      for (const site of siteList) {
+        if (haversine(site, target) > (site.radius || 0)) continue;
+        if (hasNoFly && flightPathBlocked(site, target)) continue;
+        covered[i] = true;
+        break;
+      }
+    }
+    return covered;
+  }
+
+  function runDirectFitDeployment(planning) {
+    if (optMode === 'minimize') {
+      return greedyMaxCoverage(incidents, updateRadius(), planning);
+    }
+    return greedyHeterogeneous(incidents, fleetTypes, planning);
+  }
+
+  function runSmoothedGrowthDeployment(planning) {
+    const settings = getSmoothedGrowthSettings();
+    if (incidents.length === 0) {
+      throw new Error('Smoothed Demand needs incident data. Load an incident file or generate incidents first.');
+    }
+    const grid = buildDemandGrid(incidents, settings);
+    const demandPoints = demandGridToPoints(grid);
+    if (demandPoints.length === 0) throw new Error('Smoothed Demand produced no active demand cells inside the operational area.');
+    const result = greedyWeightedDemandCoverage(
+      demandPoints,
+      updateRadius(),
+      planning,
+      settings,
+      optMode === 'fleet' ? fleetTypes : null
+    );
+    const traceIncidents = buildSmoothedTemporalTrace(result.stations, demandPoints, grid, settings);
+    result.mode = PLANNING_MODE.SMOOTHED_GROWTH;
+    result.settings = settings;
+    result.demandGrid = grid;
+    result.demandPoints = demandPoints;
+    result.traceIncidents = traceIncidents;
+    result.historicalCovered = historicalCoverageByStations(result.stations, incidents);
+    return result;
+  }
+
+  function deploymentIncidentsForResult(result) {
+    return result && result.traceIncidents && result.traceIncidents.length ? result.traceIncidents : incidents;
+  }
+
   // ============ INCIDENT HEATMAP ============
   const heatmapLayer = new HeatmapCanvasLayer(drawIncidentHeatmap);
 
@@ -2109,6 +2637,22 @@
 
   function drawIncidentHeatmap(ctx) {
     if (!heatmapEnabled) return;
+    if (getSelectedPlanningMode() === PLANNING_MODE.SMOOTHED_GROWTH && lastDemandGrid && Array.isArray(lastDemandGrid.activeCells)) {
+      const cells = lastDemandGrid.activeCells;
+      if (cells.length === 0) return;
+      const zoom = map.getZoom();
+      const radius = Math.max(12, Math.min(42, 12 + zoom * 1.2));
+      const maxWeight = Math.max(1e-9, ...cells.map(c => Number(c.normalizedWeight) || 0));
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (const cell of cells) {
+        const p = map.latLngToContainerPoint([cell.lat, cell.lng]);
+        const intensity = Math.max(0.18, Math.min(1.25, (Number(cell.normalizedWeight) || 0) / maxWeight));
+        drawHeatSpot(ctx, p.x, p.y, radius, '#7CDCE8', intensity);
+      }
+      ctx.restore();
+      return;
+    }
     const filtered = getHeatmapFilteredIncidents();
     if (filtered.length === 0) return;
     const zoom = map.getZoom();
@@ -2141,6 +2685,10 @@
       el.textContent = 'Load incidents to render demand density.';
       return;
     }
+    if (getSelectedPlanningMode() === PLANNING_MODE.SMOOTHED_GROWTH && lastDemandGrid) {
+      el.textContent = `${lastDemandGrid.activeCells.length} KDE demand cells shown - ${formatDistance(lastDemandGrid.bandwidthMeters)} smoothing radius`;
+      return;
+    }
     const filtered = getHeatmapFilteredIncidents();
     const modeLabel = {
       all: 'incident density',
@@ -2153,7 +2701,7 @@
   }
 
   function refreshHeatmap() {
-    if (heatmapEnabled && incidents.length > 0) {
+    if (heatmapEnabled && (incidents.length > 0 || lastDemandGrid)) {
       if (!map.hasLayer(heatmapLayer)) heatmapLayer.addTo(map);
       heatmapLayer.redraw();
     } else if (map.hasLayer(heatmapLayer)) {
@@ -2193,6 +2741,7 @@
   }
 
   wireHeatmapControls();
+  syncPlanningModeControls();
 
   // ============ RENDERING ============
   function renderIncidents(coveredArr) {
@@ -2753,6 +3302,59 @@
     if (chartBlock) chartBlock.style.display = 'none';
   }
 
+  function clearRenderedDeployment() {
+    stationLayer.clearLayers();
+    coverageLayer.clearLayers();
+    selectedStationLayer.clearLayers();
+    stations = [];
+    selectedStationIndex = null;
+    lastIncidentCoverage = null;
+    lastDemandGrid = null;
+    lastPlanningResultMeta = null;
+    window.__lastCurve = null;
+    document.getElementById('m-stations').textContent = '-';
+    document.getElementById('m-coverage').textContent = '-';
+    document.getElementById('m-units').textContent = '-';
+    document.getElementById('m-kpi').textContent = '-';
+    document.getElementById('status3').textContent = incidents.length > 0 ? 'Ready to optimize' : 'No deployment computed';
+    document.getElementById('status3').classList.remove('good');
+    clearStationReport();
+    renderIncidents(null);
+    syncStepNavButtons();
+  }
+
+  function cacheCurrentPlanningResult() {
+    const mode = planningModeState.mode;
+    if (!mode || stations.length === 0) return;
+    modeResultCache[mode] = {
+      stations: stations.map(s => ({ ...s, incidentIdx: Array.isArray(s.incidentIdx) ? s.incidentIdx.slice() : [] })),
+      coverage: Array.isArray(lastIncidentCoverage) ? lastIncidentCoverage.slice() : lastIncidentCoverage,
+      demandGrid: lastDemandGrid,
+      meta: lastPlanningResultMeta,
+      curve: window.__lastCurve || null,
+      statusHtml: document.getElementById('status3') ? document.getElementById('status3').innerHTML : ''
+    };
+  }
+
+  function restorePlanningResult(mode) {
+    const cached = modeResultCache[mode];
+    if (!cached || !Array.isArray(cached.stations)) return false;
+    stations = cached.stations.map(s => ({ ...s, incidentIdx: Array.isArray(s.incidentIdx) ? s.incidentIdx.slice() : [] }));
+    lastDemandGrid = cached.demandGrid || null;
+    lastPlanningResultMeta = cached.meta || null;
+    window.__lastCurve = cached.curve || null;
+    selectedStationIndex = null;
+    renderStations(stations);
+    renderIncidents(cached.coverage || null);
+    const status = document.getElementById('status3');
+    if (status) {
+      status.innerHTML = cached.statusHtml || 'Deployment restored';
+      status.classList.add('good');
+    }
+    refreshPlanMetrics();
+    return true;
+  }
+
   // ============ EVENTS ============
   // Custom polygon/rectangle drawing
   let drawMode = null;
@@ -2913,6 +3515,9 @@
     selectedStationLayer.clearLayers();
     incidents = [];
     stations = [];
+    lastDemandGrid = null;
+    lastPlanningResultMeta = null;
+    modeResultCache = {};
 
     areaPolygon = layer;
     areaLayer.addLayer(areaPolygon);
@@ -2983,6 +3588,9 @@
     coverageLayer.clearLayers();
     selectedStationLayer.clearLayers();
     stations = [];
+    lastDemandGrid = null;
+    lastPlanningResultMeta = null;
+    modeResultCache = {};
 
     if (mode === 'uniform') incidents = generateUniform(count);
     else if (mode === 'clustered') incidents = generateClustered(count);
@@ -3070,12 +3678,20 @@
   updateRadius();
 
   document.getElementById('optimizeBtn').onclick = function() {
-    if (incidents.length === 0) return;
+    syncPlanningModeStateFromControls();
+    const planningMode = getSelectedPlanningMode();
+    if (incidents.length === 0) {
+      if (planningMode === PLANNING_MODE.SMOOTHED_GROWTH) {
+        alert('Smoothed Demand needs incident data. Load an incident file or generate incidents first.');
+        setFooter('Load or generate incidents first');
+      }
+      return;
+    }
     if (optMode === 'fleet' && (fleetTypes.length === 0 || fleetTypes.every(t => (parseInt(t.count) || 0) === 0))) {
       setFooter('Add at least one drone type with a non-zero count');
       return;
     }
-    setFooter('Computing optimal deployment...');
+    setFooter(planningMode === PLANNING_MODE.SMOOTHED_GROWTH ? 'Computing smoothed demand deployment...' : 'Computing direct fit deployment...');
     document.getElementById('optimizeBtn').disabled = true;
     document.getElementById('optimizeBtn').textContent = 'Computing...';
 
@@ -3087,29 +3703,48 @@
       try {
         let result;
         const planning = getPlanningParams();
-        if (optMode === 'minimize') {
-          const radius = updateRadius();
-          result = greedyMaxCoverage(incidents, radius, planning);
-        } else {
-          result = greedyHeterogeneous(incidents, fleetTypes, planning);
-        }
+        const activeMode = getSelectedPlanningMode();
+        result = activeMode === PLANNING_MODE.SMOOTHED_GROWTH
+          ? runSmoothedGrowthDeployment(planning)
+          : runDirectFitDeployment(planning);
 
         // Apply concurrency sizing (Erlang B) per cluster
         const kpi = getKpiParams();
         const remainingByType = (optMode === 'fleet') ? (result.remainingByType || {}) : null;
-        applyConcurrency(result.stations, kpi, remainingByType, incidents);
+        const simulationIncidents = deploymentIncidentsForResult(result);
+        applyConcurrency(result.stations, kpi, remainingByType, simulationIncidents);
 
         stations = result.stations;
         selectedStationIndex = null;
         renderStations(stations);
-        renderIncidents(result.covered);
+        lastDemandGrid = result.demandGrid || null;
+        lastPlanningResultMeta = {
+          mode: activeMode,
+          settings: result.settings || null,
+          demandGrid: result.demandGrid ? {
+            resolution: result.demandGrid.resolution,
+            bandwidthMeters: result.demandGrid.bandwidthMeters,
+            demandThresholdPct: result.demandGrid.demandThresholdPct,
+            activeCellCount: result.demandGrid.activeCells.length,
+            droppedCellCount: result.demandGrid.droppedCells
+          } : null,
+          traceIncidentCount: simulationIncidents.length,
+          historicalIncidentCount: incidents.length
+        };
+        if (activeMode === PLANNING_MODE.SMOOTHED_GROWTH) {
+          heatmapEnabled = true;
+          const heatmapToggle = document.getElementById('heatmapEnabled');
+          if (heatmapToggle) heatmapToggle.checked = true;
+        }
+        const renderedCoverage = activeMode === PLANNING_MODE.SMOOTHED_GROWTH ? result.historicalCovered : result.covered;
+        renderIncidents(renderedCoverage);
 
         setPanelState('panel3', 'done');
 
         const totalUnits = stations.reduce((s, x) => s + (x.units || 1), 0);
         const totalShortfall = stations.reduce((s, x) => s + (x.shortfall || 0), 0);
-        const kpiCompliance = overallKpiCompliance(stations, incidents.length);
-        const prioCompliance = compliancePerPriority(stations, incidents);
+        const kpiCompliance = overallKpiCompliance(stations, simulationIncidents.length);
+        const prioCompliance = compliancePerPriority(stations, simulationIncidents);
         const targets = getPriorityTargets();
 
         // Per-category compliance pills (one per defined category that has demand)
@@ -3126,11 +3761,21 @@
         }).join(' ');
 
         let statusText = `<strong>${totalUnits} DroneBox unit${totalUnits === 1 ? '' : 's'}</strong> across ${stations.length} site${stations.length === 1 ? '' : 's'}<br>${pillsHtml}`;
-        statusText += `<br>Geographic coverage: ${result.coveragePercent.toFixed(1)}% / ${planning.coverageTargetPct.toFixed(0)}% target`;
+        if (activeMode === PLANNING_MODE.SMOOTHED_GROWTH) {
+          const settings = result.settings || getSmoothedGrowthSettings();
+          statusText += `<br>Mode: Smoothed Demand +${Math.round((settings.growthMultiplier - 1) * 100)}% volume | KDE ${result.demandGrid.activeCells.length} cells @ ${formatDistance(result.demandGrid.bandwidthMeters)}`;
+          statusText += `<br>Weighted demand coverage: ${result.coveragePercent.toFixed(1)}% / ${planning.coverageTargetPct.toFixed(0)}% target`;
+        } else {
+          statusText += `<br>Mode: Direct Fit`;
+          statusText += `<br>Geographic coverage: ${result.coveragePercent.toFixed(1)}% / ${planning.coverageTargetPct.toFixed(0)}% target`;
+        }
         const networkLoad = buildNetworkLoadSummary();
         statusText += `<br>Network load: ${networkLoad.loadPct.toFixed(0)}% | queue risk ${networkLoad.queueRiskPct.toFixed(0)}% | peak hour ${formatHourLabel(networkLoad.peakHour)}`;
         if (!result.targetMet) {
-          statusText += `<br><span style="color:var(--incident)">Target stopped early: next station would cover fewer than ${planning.minIncidentsPerSite} incident${planning.minIncidentsPerSite === 1 ? '' : 's'}</span>`;
+          const stopLabel = activeMode === PLANNING_MODE.SMOOTHED_GROWTH
+            ? `next station would add less than ${(result.minMarginalShare * 100).toFixed(1)}% of weighted demand`
+            : `next station would cover fewer than ${planning.minIncidentsPerSite} incident${planning.minIncidentsPerSite === 1 ? '' : 's'}`;
+          statusText += `<br><span style="color:var(--incident)">Target stopped early: ${stopLabel}</span>`;
         }
         if (optMode === 'fleet' && result.inventoryUsed) {
           const used = result.inventoryUsed.filter(t => t.used > 0).map(t => `${t.used}× ${t.name}`).join(' · ');
@@ -3148,11 +3793,12 @@
         document.getElementById('m-kpi').innerHTML = (kpiCompliance * 100).toFixed(1) + '<span class="metric-unit">%</span>';
 
         // Marginal-value curves
-        const curve = computeMarginalCurves(stations, incidents);
+        const curve = computeMarginalCurves(stations, simulationIncidents);
         window.__lastCurve = curve; // saved for PDF export
         renderSaturationCurves(curve, planning);
         renderStationReportList();
         renderStationDetail(null);
+        cacheCurrentPlanningResult();
 
         document.getElementById('optimizeBtn').disabled = false;
         document.getElementById('optimizeBtn').textContent = 'Re-compute';
@@ -3185,6 +3831,9 @@
     __noFlyCache = [];
     __noDeployCache = [];
     __waterCache = [];
+    lastDemandGrid = null;
+    lastPlanningResultMeta = null;
+    modeResultCache = {};
     updateNoFlyStatus();
     updateNoDeployStatus();
     updateWaterStatus();
@@ -3266,6 +3915,7 @@
       alert('Nothing to save. Define an area, load incidents, or compute a deployment first.');
       return null;
     }
+    syncPlanningModeStateFromControls();
     const kpi = getKpiParams();
     const planning = getPlanningParams();
     const networkLoad = buildNetworkLoadSummary();
@@ -3277,14 +3927,29 @@
       version: SAVED_PLAN_VERSION,
       savedAt: new Date().toISOString(),
       mode: optMode,
+      planning_mode: getSelectedPlanningMode(),
       planningModeState: mergePlanningModeState({
         ...planningModeState,
         directFit: {
           ...planningModeState.directFit,
           coverageTargetPct: planning.coverageTargetPct,
           minIncidentsPerSite: planning.minIncidentsPerSite
-        }
+        },
+        smoothedGrowth: getSmoothedGrowthSettings()
       }),
+      planning_result_meta: lastPlanningResultMeta ? {
+        ...lastPlanningResultMeta,
+        demandGrid: lastPlanningResultMeta.demandGrid ? { ...lastPlanningResultMeta.demandGrid } : null
+      } : null,
+      smoothed_demand: lastDemandGrid ? {
+        resolution: lastDemandGrid.resolution,
+        bandwidth_meters: lastDemandGrid.bandwidthMeters,
+        demand_threshold_pct: lastDemandGrid.demandThresholdPct,
+        active_cell_count: lastDemandGrid.activeCells.length,
+        dropped_cell_count: lastDemandGrid.droppedCells,
+        total_raw_weight: lastDemandGrid.totalRawWeight,
+        max_weight: lastDemandGrid.maxWeight
+      } : null,
       ui: {
         step: activeStep,
         unitSystem,
@@ -3302,7 +3967,9 @@
         incident_period_h: kpi.periodHours,
         service_time_min: kpi.serviceTimeMin,
         geographic_coverage_target: planning.coverageTarget,
-        min_incidents_per_site: planning.minIncidentsPerSite
+        min_incidents_per_site: planning.minIncidentsPerSite,
+        planning_mode: getSelectedPlanningMode(),
+        demand_growth_multiplier: getSmoothedGrowthSettings().growthMultiplier
       },
       inputs: {
         minimize_preset: document.getElementById('minimizePreset') ? document.getElementById('minimizePreset').value : 'custom',
@@ -3346,7 +4013,7 @@
         sites: stations.length,
         total_dronebox_units: totalUnits,
         shortfall_units: totalShortfall,
-        kpi_compliance_pct: 100 * overallKpiCompliance(stations, incidents.length),
+        kpi_compliance_pct: 100 * overallKpiCompliance(stations, (lastPlanningResultMeta && lastPlanningResultMeta.traceIncidentCount) || incidents.length),
         network_load_pct: networkLoad.loadPct,
         network_availability_pct: networkLoad.availabilityPct,
         network_queue_risk_pct: networkLoad.queueRiskPct,
@@ -3373,6 +4040,9 @@
         lng: s.lng,
         covered: s.covered,
         incidentIdx: Array.isArray(s.incidentIdx) ? s.incidentIdx.slice() : [],
+        demandIdx: Array.isArray(s.demandIdx) ? s.demandIdx.slice() : [],
+        demandWeight: s.demandWeight || null,
+        baselineCovered: s.baselineCovered || null,
         radius: s.radius,
         typeName: s.typeName,
         color: s.color,
@@ -4805,7 +5475,19 @@
     }
 
     // 3e. Optional incident-demand heatmap, included in the PDF when enabled.
-    if (heatmapEnabled && incidents.length > 0) {
+    if (heatmapEnabled && getSelectedPlanningMode() === PLANNING_MODE.SMOOTHED_GROWTH && lastDemandGrid) {
+      const cells = lastDemandGrid.activeCells || [];
+      const radius = Math.max(12, Math.min(42, 12 + map.getZoom() * 1.2));
+      const heatMaxW = Math.max(1e-9, ...cells.map(c => Number(c.normalizedWeight) || 0));
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (const cell of cells) {
+        const p = ll2px({ lat: cell.lat, lng: cell.lng });
+        const intensity = Math.max(0.18, Math.min(1.25, (Number(cell.normalizedWeight) || 0) / heatMaxW));
+        drawHeatSpot(ctx, p.x, p.y, radius, '#7CDCE8', intensity);
+      }
+      ctx.restore();
+    } else if (heatmapEnabled && incidents.length > 0) {
       const filtered = getHeatmapFilteredIncidents();
       const radius = Math.max(18, Math.min(56, 18 + map.getZoom() * 1.6));
       const heatWeights = incidentCategories.map(c => c.weight || 0);
@@ -4976,7 +5658,10 @@
       const totalUnits = stations.reduce((s, x) => s + (x.units || 1), 0);
       const networkLoad = buildNetworkLoadSummary();
       const totalShortfall = stations.reduce((s, x) => s + (x.shortfall || 0), 0);
-      const kpiCompliance = overallKpiCompliance(stations, incidents.length) * 100;
+      const complianceDenominator = lastPlanningResultMeta && lastPlanningResultMeta.traceIncidentCount
+        ? lastPlanningResultMeta.traceIncidentCount
+        : incidents.length;
+      const kpiCompliance = overallKpiCompliance(stations, complianceDenominator) * 100;
       // Geographic coverage
       let coveredCount = 0;
       for (const inc of incidents) {
@@ -5071,7 +5756,15 @@
         const t = (prioTargetsForPdf[cat.id] || 0) * 100;
         return `${cat.name.substring(0,8)} ${cat.kpiSec}s/${t.toFixed(0)}%`;
       }).join(' · ');
-      const profileLine = `Categories: ${targetsStr} | Window: ${windowLabel} | Service Time: ${kpi.serviceTimeMin}min | Load: ${networkLoad.loadPct.toFixed(0)}% | Queue: ${networkLoad.queueRiskPct.toFixed(0)}% | Geo Target: ${planning.coverageTargetPct.toFixed(0)}% | Min/Site: ${planning.minIncidentsPerSite} | Area: ${formatArea(areaKm2)} | Incidents: ${incidents.length} | No-Fly: ${noFlyZones.length} | No-Deploy: ${noDeployZones.length} | Water: ${waterZones.length}`;
+      const modeBits = [modeLabel(getSelectedPlanningMode())];
+      if (lastPlanningResultMeta && lastPlanningResultMeta.settings) {
+        modeBits.push(`Growth +${Math.round(((lastPlanningResultMeta.settings.growthMultiplier || 1) - 1) * 100)}%`);
+      }
+      if (lastPlanningResultMeta && lastPlanningResultMeta.demandGrid) {
+        modeBits.push(`KDE ${lastPlanningResultMeta.demandGrid.resolution}x${lastPlanningResultMeta.demandGrid.resolution}`);
+        modeBits.push(`BW ${formatDistance(lastPlanningResultMeta.demandGrid.bandwidthMeters)}`);
+      }
+      const profileLine = `Mode: ${modeBits.join(' / ')} | Categories: ${targetsStr} | Window: ${windowLabel} | Service Time: ${kpi.serviceTimeMin}min | Load: ${networkLoad.loadPct.toFixed(0)}% | Queue: ${networkLoad.queueRiskPct.toFixed(0)}% | Geo Target: ${planning.coverageTargetPct.toFixed(0)}% | Min/Site: ${planning.minIncidentsPerSite} | Area: ${formatArea(areaKm2)} | Incidents: ${incidents.length} | No-Fly: ${noFlyZones.length} | No-Deploy: ${noDeployZones.length} | Water: ${waterZones.length}`;
       pdf.text(profileLine, M, y);
       text(T.text);
       y += 4;
@@ -5322,9 +6015,10 @@
     }
     if (stations.length > 0) {
       const totalUnits = stations.reduce((s, x) => s + (x.units || 1), 0);
+      const networkLoad = buildNetworkLoadSummary();
       const covered = coveredArrayFromStations();
       const coveragePct = incidents.length ? (100 * covered.filter(Boolean).length / incidents.length) : 0;
-      const kpiCompliance = overallKpiCompliance(stations, incidents.length) * 100;
+      const kpiCompliance = overallKpiCompliance(stations, (lastPlanningResultMeta && lastPlanningResultMeta.traceIncidentCount) || incidents.length) * 100;
       document.getElementById('m-stations').textContent = stations.length;
       document.getElementById('m-units').textContent = totalUnits;
       document.getElementById('m-coverage').innerHTML = coveragePct.toFixed(1) + '<span class="metric-unit">%</span>';
@@ -5347,6 +6041,8 @@
     }
     resetAll();
     planningModeState = mergePlanningModeState(plan.planningModeState);
+    lastPlanningResultMeta = plan.planning_result_meta || null;
+    lastDemandGrid = null;
 
     const ui = plan.ui || {};
     unitSystem = ui.unitSystem || unitSystem;
@@ -5357,6 +6053,9 @@
     const profile = plan.mission_profile || {};
     setInputValue('kpiTimeWindow', profile.incident_period_h);
     setInputValue('kpiServiceTime', profile.service_time_min);
+    if (profile.geographic_coverage_target != null) setInputValue('geoCoverageTarget', Number(profile.geographic_coverage_target) * 100);
+    if (profile.min_incidents_per_site != null) setInputValue('minIncidentsPerSite', profile.min_incidents_per_site);
+    syncPlanningModeControls();
 
     const inputs = plan.inputs || {};
     setInputValue('minimizePreset', inputs.minimize_preset);
@@ -5446,6 +6145,9 @@
       unitsRequired: s.unitsRequired != null ? s.unitsRequired : s.units_required,
       achievedServiceLevel: s.achievedServiceLevel != null ? s.achievedServiceLevel : s.service_level_achieved,
       incidentIdx: Array.isArray(s.incidentIdx) ? s.incidentIdx.slice() : [],
+      demandIdx: Array.isArray(s.demandIdx) ? s.demandIdx.slice() : [],
+      demandWeight: s.demandWeight || null,
+      baselineCovered: s.baselineCovered || null,
       loadMetrics: s.loadMetrics || s.load_metrics || null
     })).filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lng));
 
@@ -6000,6 +6702,9 @@
     stationLayer.clearLayers();
     coverageLayer.clearLayers();
     stations = [];
+    lastDemandGrid = null;
+    lastPlanningResultMeta = null;
+    modeResultCache = {};
     renderIncidents(null);
 
     setPanelState('panel2', 'active');

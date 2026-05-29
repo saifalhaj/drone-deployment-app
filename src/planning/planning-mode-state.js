@@ -11,7 +11,7 @@
 
   function createDefaultPlanningModeState() {
     return {
-      mode: PLANNING_MODE.DIRECT_FIT,
+      mode: PLANNING_MODE.SMOOTHED_GROWTH,
       directFit: {
         coverageTargetPct: 90,
         minIncidentsPerSite: 2,
@@ -57,10 +57,13 @@
 
   function normalizeSavedPlanEnvelope(plan) {
     if (!plan || typeof plan !== 'object') return plan;
+    const version = Number(plan.version || 1);
     return {
       ...plan,
-      version: Number(plan.version || 1),
-      planningModeState: mergePlanningModeState(plan.planningModeState)
+      version,
+      planningModeState: (!plan.planningModeState && version < SAVED_PLAN_VERSION)
+        ? mergePlanningModeState({ mode: PLANNING_MODE.DIRECT_FIT })
+        : mergePlanningModeState(plan.planningModeState)
     };
   }
 
