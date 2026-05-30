@@ -105,6 +105,8 @@
   let selectedStationIndex = null;
   let unitSystem = 'metric';
   let coordFormat = 'decimal';
+  let dateFormat = 'DD/MM/YYYY';
+  let sampleDataLoaded = false;
   let boundaryFeatures = [];
   let heatmapMode = 'all';
   let heatmapEnabled = false;
@@ -118,6 +120,86 @@
   let monteCarloController = null;
   let monteCarloResult = null;
   let monteCarloInspectState = null;
+
+  // ============ LOCALIZATION / i18n SCAFFOLD ============
+  // Single-language (English) string registry plus a t() lookup. This is
+  // structural scaffolding for a future Arabic pass: wrap user-facing strings
+  // in t('key', 'English fallback') so translation becomes a content task
+  // (add an `ar` table) rather than an engineering refactor. t() resolves the
+  // active language, then English, then the inline fallback, then the key.
+  let currentLang = 'en';
+  const I18N = {
+    en: {
+      'settings.title': 'Settings',
+      'settings.units': 'Units',
+      'settings.units.metric': 'Metric (km, m, m/s)',
+      'settings.units.imperial': 'Imperial (mi, ft, mph)',
+      'settings.dateFormat': 'Date format',
+      'settings.open': 'Settings',
+      'onboarding.title': 'Welcome to the DFR Deployment Planner',
+      'onboarding.body': 'Plan where to place DroneBox first-responder stations and how many drones each needs to meet your response-time targets. Choose your display preferences below — you can change them any time from the gear icon in the header.',
+      'onboarding.continue': 'Continue',
+      'map.heatmap.toggle': 'Toggle incident-density heatmap',
+      'sample.banner': 'Sample data loaded — for evaluation only',
+      'sample.load': 'Load sample dataset',
+      'step02.advanced': 'Advanced',
+      'step02.timeWindow.override': 'Override',
+      'about.builtWith': 'Built with'
+    }
+  };
+  function t(key, fallback) {
+    const active = I18N[currentLang];
+    if (active && Object.prototype.hasOwnProperty.call(active, key)) return active[key];
+    if (I18N.en && Object.prototype.hasOwnProperty.call(I18N.en, key)) return I18N.en[key];
+    return fallback != null ? fallback : key;
+  }
+
+  // ============ USER SETTINGS (units / date format) PERSISTENCE ============
+  const SETTINGS_STORAGE_KEY = 'uascDfrSettings';
+  const DATE_FORMATS = ['DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD'];
+
+  function loadStoredSettings() {
+    try {
+      const raw = window.localStorage && localStorage.getItem(SETTINGS_STORAGE_KEY);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      return (obj && typeof obj === 'object') ? obj : null;
+    } catch (e) { return null; }
+  }
+  function saveStoredSettings() {
+    try {
+      if (!window.localStorage) return;
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({
+        unitSystem, dateFormat, coordFormat
+      }));
+    } catch (e) { /* storage unavailable (private mode, quota) — non-fatal */ }
+  }
+  function applyStoredSettingsToState() {
+    const s = loadStoredSettings();
+    if (!s) return false;
+    if (s.unitSystem === 'imperial' || s.unitSystem === 'metric') unitSystem = s.unitSystem;
+    if (DATE_FORMATS.indexOf(s.dateFormat) >= 0) dateFormat = s.dateFormat;
+    if (['decimal', 'dms', 'utm'].indexOf(s.coordFormat) >= 0) coordFormat = s.coordFormat;
+    return true;
+  }
+
+  // ============ DATE FORMATTING (display only) ============
+  function padTwo(n) { return n < 10 ? '0' + n : '' + n; }
+  function formatDate(value) {
+    const d = (value instanceof Date) ? value : new Date(value);
+    if (!d || isNaN(d.getTime())) return '';
+    const dd = padTwo(d.getDate());
+    const mm = padTwo(d.getMonth() + 1);
+    const yyyy = d.getFullYear();
+    if (dateFormat === 'MM/DD/YYYY') return `${mm}/${dd}/${yyyy}`;
+    if (dateFormat === 'YYYY-MM-DD') return `${yyyy}-${mm}-${dd}`;
+    return `${dd}/${mm}/${yyyy}`;
+  }
+  function formatDateTime(value) {
+    const d = (value instanceof Date) ? value : new Date(value);
+    if (!d || isNaN(d.getTime())) return '';
+    return formatDate(d) + ' ' + padTwo(d.getHours()) + ':' + padTwo(d.getMinutes());
+  }
 
   // ============ PLANNING MODE SCAFFOLD ============
   const SAVED_PLAN_VERSION = 2;
@@ -580,8 +662,8 @@
 
   function formatDistance(meters, precision) {
     if (unitSystem === 'imperial') {
-      const feet = meters * 3.28084;
-      if (feet < 5280) return feet.toFixed(0) + ' ft';
+      // Imperial display threshold: under 1 km show feet, 1 km and up show miles.
+      if (meters < 1000) return (meters * 3.28084).toFixed(0) + ' ft';
       const miles = meters / 1609.344;
       return miles.toFixed(precision == null ? 2 : precision) + ' mi';
     }
@@ -715,17 +797,23 @@
     const state = { ...defaults, ...(planningModeState.smoothedGrowth || {}) };
     const growthEl = document.getElementById('growthMultiplier');
     const bandwidthModeEl = document.getElementById('kdeBandwidthMode');
-    const bandwidthEl = document.getElementById('kdeBandwidthMeters');
     const gridEl = document.getElementById('kdeGridResolution');
     const thresholdEl = document.getElementById('kdeDemandThreshold');
     const growthMultiplier = Math.max(1, parseFloat(growthEl && growthEl.value) || state.growthMultiplier || 1);
-    const bandwidthMode = bandwidthModeEl && bandwidthModeEl.value === 'manual' ? 'manual' : 'auto-silverman';
-    const manualBandwidth = parseFloat(bandwidthEl && bandwidthEl.value);
+    // The Smoothing Radius select holds either 'auto-silverman' or a fixed
+    // bandwidth in metres (the former separate Manual Radius input was removed).
+    const bandwidthRaw = bandwidthModeEl ? bandwidthModeEl.value : 'auto-silverman';
+    let bandwidthMode = 'auto-silverman';
+    let bandwidthMeters = null;
+    if (bandwidthRaw && bandwidthRaw !== 'auto-silverman') {
+      const fixed = parseFloat(bandwidthRaw);
+      if (Number.isFinite(fixed) && fixed > 0) { bandwidthMode = 'manual'; bandwidthMeters = fixed; }
+    }
     return {
       ...state,
       gridResolution: Math.max(20, Math.min(200, Math.floor(parseFloat(gridEl && gridEl.value) || state.gridResolution || 100))),
       bandwidthMode,
-      bandwidthMeters: bandwidthMode === 'manual' && Number.isFinite(manualBandwidth) && manualBandwidth > 0 ? manualBandwidth : null,
+      bandwidthMeters,
       growthMultiplier,
       demandThresholdPct: Math.max(0, Math.min(25, parseFloat(thresholdEl && thresholdEl.value) || state.demandThresholdPct || 1)),
       useCategoryWeights: true
@@ -773,6 +861,20 @@
     });
   }
 
+  // Coverage Target + Min Incidents/Site are single shared inputs that live
+  // inside whichever planning mode's Advanced disclosure is active. Move the
+  // wrapper into the matching slot so each mode exposes them under its own
+  // collapsed Advanced section without duplicating element IDs.
+  function relocatePlanningTargets(mode) {
+    const block = document.getElementById('planningTargetsFields');
+    if (!block) return;
+    let host;
+    if (mode === PLANNING_MODE.MONTE_CARLO) host = document.querySelector('#monteCarloAdvanced [data-targets-slot]');
+    else if (mode === PLANNING_MODE.DIRECT_FIT) host = document.querySelector('#directFitAdvanced [data-targets-slot]');
+    else host = document.querySelector('#smoothedAdvanced [data-targets-slot]');
+    if (host && block.parentElement !== host) host.appendChild(block);
+  }
+
   function setPlanningMode(mode, opts) {
     opts = opts || {};
     if (!Object.values(PLANNING_MODE).includes(mode)) mode = PLANNING_MODE.SMOOTHED_GROWTH;
@@ -785,10 +887,13 @@
     });
     const smoothedPanel = document.getElementById('smoothedGrowthPanel');
     const monteCarloPanel = document.getElementById('monteCarloPanel');
+    const directFitPanel = document.getElementById('directFitPanel');
     const warning = document.getElementById('directFitWarning');
     if (smoothedPanel) smoothedPanel.style.display = mode === PLANNING_MODE.SMOOTHED_GROWTH ? 'block' : 'none';
     if (monteCarloPanel) monteCarloPanel.style.display = mode === PLANNING_MODE.MONTE_CARLO ? 'block' : 'none';
+    if (directFitPanel) directFitPanel.style.display = mode === PLANNING_MODE.DIRECT_FIT ? 'block' : 'none';
     if (warning) warning.style.display = mode === PLANNING_MODE.DIRECT_FIT ? 'block' : 'none';
+    relocatePlanningTargets(mode);
     if (!opts.silent && previous !== mode) {
       if (!restorePlanningResult(mode)) clearRenderedDeployment();
     }
@@ -802,8 +907,22 @@
     const mc = state.monteCarlo || {};
     setInputValue('dispatchOverhead', state.globalOverhead == null ? 15 : state.globalOverhead);
     setInputValue('growthMultiplier', sm.growthMultiplier || 1);
-    setInputValue('kdeBandwidthMode', sm.bandwidthMode || 'auto-silverman');
-    setInputValue('kdeBandwidthMeters', sm.bandwidthMeters || 1000);
+    (function setBandwidthControl() {
+      const sel = document.getElementById('kdeBandwidthMode');
+      if (!sel) return;
+      let val = 'auto-silverman';
+      if (sm.bandwidthMode === 'manual' && sm.bandwidthMeters > 0) {
+        val = String(sm.bandwidthMeters);
+        // Preserve a saved fixed bandwidth that isn't one of the presets.
+        if (!Array.prototype.some.call(sel.options, o => o.value === val)) {
+          const opt = document.createElement('option');
+          opt.value = val;
+          opt.textContent = val + ' m';
+          sel.appendChild(opt);
+        }
+      }
+      sel.value = val;
+    })();
     setInputValue('kdeGridResolution', sm.gridResolution || 100);
     setInputValue('kdeDemandThreshold', sm.demandThresholdPct == null ? 1 : sm.demandThresholdPct);
     setInputValue('mcRunCount', mc.runCount || 30);
@@ -812,19 +931,13 @@
     setInputValue('mcRobustCoreThreshold', mc.robustCoreThresholdPct == null ? 60 : mc.robustCoreThresholdPct);
     setInputValue('mcRandomSeed', mc.randomSeed);
     setInputValue('mcVisualizationMode', mc.visualizationMode || 'consensus-overlay');
-    const manual = document.getElementById('kdeBandwidthMeters');
-    if (manual) manual.disabled = (sm.bandwidthMode || 'auto-silverman') !== 'manual';
     document.querySelectorAll('.mode-tab[data-planning-mode]').forEach(btn => {
       btn.onclick = () => setPlanningMode(btn.dataset.planningMode);
     });
-    ['growthMultiplier', 'kdeBandwidthMode', 'kdeBandwidthMeters', 'kdeGridResolution', 'kdeDemandThreshold'].forEach(id => {
+    ['growthMultiplier', 'kdeBandwidthMode', 'kdeGridResolution', 'kdeDemandThreshold'].forEach(id => {
       const el = document.getElementById(id);
       if (!el) return;
       el.onchange = function() {
-        if (id === 'kdeBandwidthMode') {
-          const manualInput = document.getElementById('kdeBandwidthMeters');
-          if (manualInput) manualInput.disabled = this.value !== 'manual';
-        }
         syncPlanningModeStateFromControls();
         if (getSelectedPlanningMode() === PLANNING_MODE.SMOOTHED_GROWTH) clearRenderedDeployment();
       };
@@ -3510,6 +3623,37 @@
 
   wireHeatmapControls();
   syncPlanningModeControls();
+  initLocaleSettings();
+
+  // Map-mounted heatmap layer toggle, placed with the basemap layer control in
+  // the top-right corner. Replaces the removed Step 02 Demand Heatmap panel; the
+  // heatmap always shows incident density (heatmapMode stays 'all').
+  (function addHeatmapToggleControl() {
+    const HeatmapControl = L.Control.extend({
+      options: { position: 'topright' },
+      onAdd: function() {
+        const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control heatmap-map-toggle');
+        const link = L.DomUtil.create('a', '', container);
+        link.href = '#';
+        link.title = t('map.heatmap.toggle', 'Toggle incident-density heatmap');
+        link.setAttribute('role', 'button');
+        link.setAttribute('aria-label', link.title);
+        link.setAttribute('aria-pressed', 'false');
+        link.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 12 12 17 22 12"/><polyline points="2 17 12 22 22 17"/></svg>';
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.on(link, 'click', function(e) {
+          L.DomEvent.preventDefault(e);
+          heatmapEnabled = !heatmapEnabled;
+          container.classList.toggle('active', heatmapEnabled);
+          link.setAttribute('aria-pressed', heatmapEnabled ? 'true' : 'false');
+          renderIncidents(lastIncidentCoverage);
+        });
+        this._link = link;
+        return container;
+      }
+    });
+    map.addControl(new HeatmapControl());
+  })();
 
   // ============ RENDERING ============
   function renderIncidents(coveredArr) {
@@ -4358,16 +4502,60 @@
     unitSystem = this.value;
     convertMinimizeInputs(previous, unitSystem);
     updateLocalizationLabels();
-    refreshLocalizedOutputs();
+    applyLocaleChange();
+    saveStoredSettings();
+    syncSettingsControls();
   };
 
-  document.getElementById('coordFormat').onchange = function() {
+  const coordFormatEl = document.getElementById('coordFormat');
+  if (coordFormatEl) coordFormatEl.onchange = function() {
     coordFormat = this.value;
     refreshLocalizedOutputs();
+    saveStoredSettings();
   };
+
+  const dateFormatEl = document.getElementById('dateFormatSelect');
+  if (dateFormatEl) dateFormatEl.onchange = function() {
+    if (DATE_FORMATS.indexOf(this.value) >= 0) dateFormat = this.value;
+    applyLocaleChange();
+    saveStoredSettings();
+    syncSettingsControls();
+  };
+
+  // Header Settings gear: toggle the dropdown panel; close on outside click / Esc.
+  const settingsToggleBtn = document.getElementById('settingsToggle');
+  const settingsPanelEl = document.getElementById('settingsPanel');
+  if (settingsToggleBtn && settingsPanelEl) {
+    settingsToggleBtn.onclick = function(e) {
+      e.stopPropagation();
+      const open = settingsPanelEl.classList.toggle('open');
+      settingsToggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    document.addEventListener('click', function(e) {
+      if (!settingsPanelEl.classList.contains('open')) return;
+      if (settingsPanelEl.contains(e.target) || settingsToggleBtn.contains(e.target)) return;
+      settingsPanelEl.classList.remove('open');
+      settingsToggleBtn.setAttribute('aria-expanded', 'false');
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && settingsPanelEl.classList.contains('open')) {
+        settingsPanelEl.classList.remove('open');
+        settingsToggleBtn.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
 
   document.getElementById('clearArea').onclick = function() {
     resetAll();
+  };
+
+  // Time Window "Override": reveal the manual dropdown when auto-detected.
+  const timeWindowOverrideBtn = document.getElementById('timeWindowOverride');
+  if (timeWindowOverrideBtn) timeWindowOverrideBtn.onclick = function() {
+    const autoLine = document.getElementById('timeWindowAuto');
+    const select = document.getElementById('kpiTimeWindow');
+    if (autoLine) autoLine.style.display = 'none';
+    if (select) select.style.display = '';
   };
 
   document.getElementById('generateBtn').onclick = function() {
@@ -4423,6 +4611,62 @@
     syncStepNavButtons();
     setFooter(`${incidents.length} incidents placed`);
   };
+
+  // ============ SAMPLE DATASET (evaluation) ============
+  function setSampleDataLoaded(on) {
+    sampleDataLoaded = !!on;
+    const banner = document.getElementById('sampleDataBanner');
+    if (banner) banner.style.display = on ? 'flex' : 'none';
+  }
+
+  // Loads a fake "Sample City" area plus ~500 synthetic incidents with a
+  // realistic urban spatial pattern and a 30-day timestamp span, so evaluators
+  // can run the tool end-to-end without uploading sensitive data.
+  function loadSampleDataset() {
+    resetAll();
+    // "Sample City" footprint (~280 km²). A moderately large area keeps the KDE
+    // grid cells coarse enough that the smoothed optimizer stays responsive
+    // (a few seconds) for a first-run evaluation.
+    const bounds = L.latLngBounds([25.02, 55.12], [25.17, 55.29]);
+    const rect = L.rectangle(bounds, { color: '#7CDCE8', weight: 1.5, dashArray: '4,4', fillColor: '#7CDCE8', fillOpacity: 0.12 });
+    handleAreaCreated(rect);
+    if (map.fitBounds) map.fitBounds(bounds, { padding: [40, 40] });
+
+    // ~250 hotspot-clustered incidents: realistic and fast to compute end-to-end;
+    // the Generate flow still supports far larger sets.
+    incidents = generateClustered(250);
+    const spanHours = 720; // 30 days
+    const anchorMs = Date.now() - spanHours * 3600000;
+    assignTimestamps(incidents, spanHours);
+    for (const inc of incidents) {
+      const offsetH = (typeof inc.t === 'number') ? inc.t : Math.random() * spanHours;
+      inc.timestamp = new Date(anchorMs + offsetH * 3600000).toISOString();
+    }
+    assignPriorities(incidents, getPriorityMix());
+
+    renderIncidents(null);
+    setPanelState('panel2', 'active');
+    setPanelState('panel3', null);
+    document.getElementById('optimizeBtn').disabled = false;
+    const status2 = document.getElementById('status2');
+    if (status2) { status2.textContent = `${incidents.length} sample incidents loaded (Sample City)`; status2.classList.add('good'); }
+    document.getElementById('m-incidents').textContent = incidents.length;
+    document.getElementById('m-stations').textContent = '—';
+    document.getElementById('m-coverage').textContent = '—';
+    document.getElementById('m-units').textContent = '—';
+    document.getElementById('m-kpi').textContent = '—';
+    setDeploymentSnapshotVisible(false);
+    clearStationReport();
+    updateIncidentStats({ realTimestamps: true, anchorMs, spanHours });
+    syncStepNavButtons();
+    setSampleDataLoaded(true);
+    setFooter('Sample dataset loaded — for evaluation only');
+  }
+
+  const loadSampleBtn = document.getElementById('loadSampleBtn');
+  if (loadSampleBtn) loadSampleBtn.onclick = loadSampleDataset;
+  const sampleBannerClear = document.getElementById('sampleBannerClear');
+  if (sampleBannerClear) sampleBannerClear.onclick = function() { resetAll(); };
 
   function updateRadius() {
     const manual = inputRadiusToM(document.getElementById('manualRadius').value);
@@ -4664,6 +4908,7 @@
   };
 
   function resetAll() {
+    setSampleDataLoaded(false);
     areaLayer.clearLayers();
     incidentLayer.clearLayers();
     stationLayer.clearLayers();
@@ -6651,7 +6896,7 @@
       const optimizerModeLabel = (optMode === 'minimize')
         ? 'Capacity Sizing — required units calculated'
         : 'Fixed Fleet — existing assets allocated';
-      pdf.text(optimizerModeLabel + '  ·  ' + new Date().toLocaleString(), M + 30, 21);
+      pdf.text(optimizerModeLabel + '  ·  ' + formatDateTime(new Date()), M + 30, 21);
 
       stroke(T.border);
       pdf.setLineWidth(0.3);
@@ -7722,7 +7967,7 @@
     if (result.hasPriorityColumn) html += '<th>Category</th>';
     html += '</tr></thead><tbody>';
     preview.forEach((p, i) => {
-      const ts = new Date(p.timestamp).toISOString().replace('T', ' ').slice(0, 19);
+      const ts = formatDateTime(new Date(p.timestamp));
       html += `<tr>
         <td>${i + 1}</td>
         <td>${formatCoordinate(p.lat, p.lng)}</td>
@@ -7912,6 +8157,62 @@
     setTimeout(wireAboutAndLogo, 0);
   }
 
+  // ============ SETTINGS PANEL + FIRST-USE ONBOARDING ============
+  // Mirror the live unit/date state into every settings + onboarding control.
+  function syncSettingsControls() {
+    setInputValue('unitSystem', unitSystem);
+    setInputValue('dateFormatSelect', dateFormat);
+    setInputValue('coordFormat', coordFormat);
+    setInputValue('onboardUnits', unitSystem);
+    setInputValue('onboardDateFormat', dateFormat);
+  }
+
+  // Re-render every display surface that depends on units or date format.
+  function applyLocaleChange() {
+    refreshLocalizedOutputs();
+    if (stations.length > 0 && typeof renderStationReportList === 'function') renderStationReportList();
+  }
+
+  // Read stored prefs into state and push them to the controls. Returns whether
+  // a stored settings object existed (false => first use => show onboarding).
+  function initLocaleSettings() {
+    const hadStored = applyStoredSettingsToState();
+    syncSettingsControls();
+    updateLocalizationLabels();
+    refreshLocalizedOutputs();
+    window.__dfrOnboardingNeeded = !hadStored;
+    return hadStored;
+  }
+
+  function wireOnboarding() {
+    const m = document.getElementById('onboardingModal');
+    if (!m) return;
+    const continueBtn = document.getElementById('onboardContinue');
+    if (continueBtn) continueBtn.onclick = function() {
+      const u = document.getElementById('onboardUnits');
+      const d = document.getElementById('onboardDateFormat');
+      const prevUnit = unitSystem;
+      if (u && (u.value === 'metric' || u.value === 'imperial')) unitSystem = u.value;
+      if (d && DATE_FORMATS.indexOf(d.value) >= 0) dateFormat = d.value;
+      convertMinimizeInputs(prevUnit, unitSystem);
+      updateLocalizationLabels();
+      saveStoredSettings();
+      syncSettingsControls();
+      applyLocaleChange();
+      m.style.display = 'none';
+    };
+    if (window.__dfrOnboardingNeeded) {
+      setInputValue('onboardUnits', unitSystem);
+      setInputValue('onboardDateFormat', dateFormat);
+      m.style.display = 'flex';
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wireOnboarding);
+  } else {
+    setTimeout(wireOnboarding, 0);
+  }
+
   document.getElementById('incidentFileInput').onchange = async function(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -7935,8 +8236,46 @@
   };
 
   // ============ INCIDENT STATISTICS ============
+  // Smallest standard window option (hours) that fully covers the data span.
+  function pickTimeWindowOption(spanHours) {
+    if (spanHours <= 24) return '24';
+    if (spanHours <= 168) return '168';
+    if (spanHours <= 720) return '720';
+    return '8760';
+  }
+  function humanTimeWindow(spanHours) {
+    const days = spanHours / 24;
+    if (days < 1.5) return Math.max(1, Math.round(days)) + (Math.round(days) === 1 ? ' day' : ' days');
+    if (days < 14) return Math.round(days) + ' days';
+    const weeks = days / 7;
+    if (weeks < 9) return Math.round(weeks) + (Math.round(weeks) === 1 ? ' week' : ' weeks');
+    const months = days / 30;
+    if (months < 18) return Math.round(months) + (Math.round(months) === 1 ? ' month' : ' months');
+    const years = days / 365;
+    return Math.round(years) + (Math.round(years) === 1 ? ' year' : ' years');
+  }
+  // When incidents carry real timestamps, auto-detect the time window from the
+  // data span and show a read-only summary with an Override link; for synthetic
+  // data fall back to the manual dropdown (default 1 day).
+  function applyTimeWindowAutoDetect(meta) {
+    const autoLine = document.getElementById('timeWindowAuto');
+    const autoText = document.getElementById('timeWindowAutoText');
+    const select = document.getElementById('kpiTimeWindow');
+    if (!autoLine || !select) return;
+    if (meta && meta.realTimestamps && meta.spanHours > 0) {
+      select.value = pickTimeWindowOption(meta.spanHours);
+      if (autoText) autoText.textContent = 'Time Window: ' + humanTimeWindow(meta.spanHours) + ' (auto-detected from incident data)';
+      autoLine.style.display = 'flex';
+      select.style.display = 'none';
+    } else {
+      autoLine.style.display = 'none';
+      select.style.display = '';
+    }
+  }
+
   function updateIncidentStats(meta) {
     window.__lastIncidentStatsMeta = meta || null;
+    applyTimeWindowAutoDetect(meta);
     const block = document.getElementById('incidentStatsBlock');
     if (!incidents || incidents.length === 0) {
       block.style.display = 'none';
@@ -7955,7 +8294,7 @@
       spanHours = meta.spanHours;
       const first = new Date(meta.anchorMs);
       const last = new Date(meta.anchorMs + spanHours * 3600000);
-      spanDesc = first.toISOString().slice(0,10) + ' → ' + last.toISOString().slice(0,10);
+      spanDesc = formatDate(first) + ' → ' + formatDate(last);
     } else {
       spanHours = parseFloat(document.getElementById('kpiTimeWindow').value) || 24;
       spanDesc = 'Synthetic window — anchored at run time';
@@ -8000,12 +8339,12 @@
       const pEnd   = new Date(peakEndMs);
       if (binLabel === 'hour') {
         const pad = x => String(x).padStart(2, '0');
-        peakWhen = pStart.toISOString().slice(0, 10) + ' · ' +
+        peakWhen = formatDate(pStart) + ' · ' +
                    pad(pStart.getUTCHours()) + ':00–' + pad(pEnd.getUTCHours()) + ':00';
       } else if (binLabel === 'day') {
-        peakWhen = pStart.toISOString().slice(0, 10);
+        peakWhen = formatDate(pStart);
       } else {
-        peakWhen = pStart.toISOString().slice(0, 10) + ' (week ' + (peakBin + 1) + ')';
+        peakWhen = formatDate(pStart) + ' (week ' + (peakBin + 1) + ')';
       }
     } else {
       // Synthetic: express as offset from window start in readable units

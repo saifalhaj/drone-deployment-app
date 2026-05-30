@@ -27,7 +27,35 @@
  <span><b>OPR //</b> CMD/UASC</span>
  <span><b>CLS //</b> CONFIDENTIAL</span>
  </div>
+ <div class="header-actions">
  <div class="system-state"><span class="status-dot live" id="systemDot"></span>SYSTEM READY</div>
+ <button class="header-icon-btn" id="aboutBtn" type="button" title="About this tool" aria-label="About this tool">
+ <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><circle cx="12" cy="7.5" r="0.6" fill="currentColor" stroke="none"/></svg>
+ </button>
+ <div class="settings-wrap">
+ <button class="header-icon-btn" id="settingsToggle" type="button" title="Settings" aria-label="Settings" aria-haspopup="true" aria-expanded="false">
+ <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+ </button>
+ <div class="settings-panel" id="settingsPanel" role="dialog" aria-label="Settings">
+ <div class="settings-panel-title">Settings</div>
+ <div class="field">
+ <label class="field-label" for="unitSystem">Units</label>
+ <select id="unitSystem">
+ <option value="metric" selected>Metric (km, m, m/s)</option>
+ <option value="imperial">Imperial (mi, ft, mph)</option>
+ </select>
+ </div>
+ <div class="field">
+ <label class="field-label" for="dateFormatSelect">Date format</label>
+ <select id="dateFormatSelect">
+ <option value="DD/MM/YYYY" selected>DD/MM/YYYY</option>
+ <option value="MM/DD/YYYY">MM/DD/YYYY</option>
+ <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+ </select>
+ </div>
+ </div>
+ </div>
+ </div>
  </div>
  </header>
 
@@ -113,14 +141,6 @@
  <span class="derived-value" id="radiusDisplay">1200 m</span>
  </div>
  <div class="subsection-label" style="margin-top: 12px;">Localization</div>
- <div class="field-row">
- <div class="field">
- <label class="field-label">Units</label>
- <select id="unitSystem">
- <option value="metric" selected>Metric</option>
- <option value="imperial">Imperial</option>
- </select>
- </div>
  <div class="field">
  <label class="field-label">Coordinates</label>
  <select id="coordFormat">
@@ -128,7 +148,7 @@
  <option value="dms">DMS</option>
  <option value="utm">UTM grid</option>
  </select>
- </div>
+ <div class="field-desc">Units (metric/imperial) and date format are in <strong>Settings</strong> (gear icon, top-right)</div>
  </div>
  <div id="minimizePresetNote" class="type-notes" style="margin-top: 4px;"></div>
  </div>
@@ -262,8 +282,12 @@
  </div>
  <p class="help">Generate synthetic incidents from a distribution, or upload real incident data (CSV / Excel) with date, time, and coordinates.</p>
 
- <div class="field">
+ <div class="field" id="timeWindowField">
  <label class="field-label">Time Window</label>
+ <div class="auto-detected-line" id="timeWindowAuto" style="display:none;">
+ <span id="timeWindowAutoText">Time Window: 1 day</span>
+ <button type="button" class="text-link" id="timeWindowOverride">Override</button>
+ </div>
  <select id="kpiTimeWindow">
  <option value="24" selected>1 day</option>
  <option value="168">1 week</option>
@@ -286,13 +310,17 @@
  <button class="mode-tab" data-source="upload">Upload</button>
  </div>
 
+ <p class="help sample-data-line" style="font-size: 11px;">New here? <button type="button" class="text-link" id="loadSampleBtn">Load sample dataset</button> — a fake "Sample City" with a realistic incident set to try the tool end-to-end.</p>
+
  <div id="generateSourcePanel">
- <div class="field-row">
  <div class="field">
  <label class="field-label">Count</label>
  <input type="number" id="incidentCount" value="120" min="5" max="2000">
  </div>
- <div class="field">
+ <p class="help" style="margin-top: 8px; font-size: 11px;">Probability of each category is driven by the <strong>Weight</strong> field in the Incident KPIs section above. Defaults to Hotspot Clusters distribution.</p>
+ <details class="advanced-settings" id="generateAdvanced">
+ <summary>Advanced</summary>
+ <div class="field" style="margin-top: 10px;">
  <label class="field-label">Distribution</label>
  <select id="patternMode">
  <option value="clustered">Hotspot Clusters</option>
@@ -305,8 +333,7 @@
  <option value="mixed">Mixed Urban Demand</option>
  </select>
  </div>
- </div>
- <p class="help" style="margin-top: 8px; font-size: 11px;">Probability of each category is driven by the <strong>Weight</strong> field in the Incident KPIs section above.</p>
+ </details>
  <div class="field-row" style="gap: 6px;">
  <button class="btn btn-primary" id="generateBtn" disabled>Generate Incidents</button>
  <button class="btn btn-secondary" id="downloadGeneratedBtn" disabled title="Download the generated incidents as CSV - same format the upload parser reads">Download CSV</button>
@@ -325,62 +352,6 @@
  </div>
 
  <div class="status-line" id="status2">No incident data</div>
-
- <div class="heatmap-panel" id="incidentHeatmapPanel">
- <div class="heatmap-head">
- <div>
- <span class="subsection-label">Demand Heatmap</span>
- <p class="help">Visualize where incidents concentrate before assessing coverage.</p>
- </div>
- <label class="heatmap-toggle"><input type="checkbox" id="heatmapEnabled"> Heatmap</label>
- </div>
- <div class="field-row">
- <div class="field">
- <label class="field-label">Layer</label>
- <select id="heatmapMode">
- <option value="all">Incident density</option>
- <option value="priority">Priority-only heatmap</option>
- <option value="tod">Time-of-day heatmap</option>
- <option value="type">Incident type heatmap</option>
- <option value="month">Seasonal / monthly demand</option>
- </select>
- </div>
- <div class="field" id="heatmapCategoryField">
- <label class="field-label">Incident Type</label>
- <select id="heatmapCategory"></select>
- </div>
- </div>
- <div class="field-row">
- <div class="field" id="heatmapHourField">
- <label class="field-label">Time of Day</label>
- <select id="heatmapHour">
- <option value="all">All hours</option>
- <option value="day">Day shift · 06-18</option>
- <option value="night">Night shift · 18-06</option>
- <option value="peak">Peak hour only</option>
- </select>
- </div>
- <div class="field" id="heatmapMonthField">
- <label class="field-label">Month</label>
- <select id="heatmapMonth">
- <option value="all">All months</option>
- <option value="0">January</option>
- <option value="1">February</option>
- <option value="2">March</option>
- <option value="3">April</option>
- <option value="4">May</option>
- <option value="5">June</option>
- <option value="6">July</option>
- <option value="7">August</option>
- <option value="8">September</option>
- <option value="9">October</option>
- <option value="10">November</option>
- <option value="11">December</option>
- </select>
- </div>
- </div>
- <div class="heatmap-summary" id="heatmapSummary">Load incidents to render demand density.</div>
- </div>
 
  <div id="incidentStatsBlock" class="stats-block" style="display:none;">
  <div class="stats-header">
@@ -461,6 +432,12 @@
  <button class="mode-tab" type="button" data-planning-mode="monte-carlo">Monte Carlo</button>
  </div>
  <div class="status-line" id="directFitWarning" style="display:none;">Direct Fit places stations around the exact incidents loaded in this session. It is useful for forensic review, fixed-event planning, and explaining how a known historical period would have been covered. It is not suitable for procurement planning or annual deployment sizing because it can overfit isolated calls, missing records, and random historical noise. For station investment decisions, use Smoothed Demand + Growth or Monte Carlo.</div>
+ <div id="directFitPanel" style="display:none;">
+ <details class="advanced-settings" id="directFitAdvanced">
+ <summary>Advanced</summary>
+ <div class="advanced-targets-slot" data-targets-slot></div>
+ </details>
+ </div>
  <div id="smoothedGrowthPanel">
  <div class="field">
  <label class="field-label">Demand Growth Scenario</label>
@@ -479,15 +456,14 @@
  <label class="field-label">Smoothing Radius</label>
  <select id="kdeBandwidthMode">
  <option value="auto-silverman">Auto Silverman</option>
- <option value="manual">Manual meters</option>
+ <option value="500">500 m</option>
+ <option value="1000">1000 m</option>
+ <option value="1500">1500 m</option>
+ <option value="2000">2000 m</option>
+ <option value="3000">3000 m</option>
  </select>
+ <div class="field-desc">Auto Silverman derives the radius from your data; or pick a fixed value</div>
  </div>
- <div class="field">
- <label class="field-label">Manual Radius (m)</label>
- <input type="number" id="kdeBandwidthMeters" value="1000" min="100" step="50" disabled>
- </div>
- </div>
- <div class="field-row">
  <div class="field">
  <label class="field-label">Grid Resolution</label>
  <select id="kdeGridResolution">
@@ -496,11 +472,12 @@
  <option value="150">150 x 150</option>
  </select>
  </div>
+ </div>
  <div class="field">
  <label class="field-label">Ignore Low-Demand Cells (%)</label>
  <input type="number" id="kdeDemandThreshold" value="1" min="0" max="25" step="0.5">
  </div>
- </div>
+ <div class="advanced-targets-slot" data-targets-slot></div>
  </details>
  </div>
  <div id="monteCarloPanel" style="display:none;">
@@ -546,6 +523,7 @@
  <option value="probability-markers">Probability-weighted markers</option>
  </select>
  </div>
+ <div class="advanced-targets-slot" data-targets-slot></div>
  </details>
  <div class="mc-progress" id="mcProgressPanel" style="display:none;">
  <div class="mc-progress-text" id="mcProgressText">Running Monte Carlo 0 / 30...</div>
@@ -570,7 +548,10 @@
  <div class="mc-run-table" id="mcRunTable"></div>
  </div>
  </div>
- <div class="subsection-label">Planning Realism</div>
+ <!-- Coverage Target + Min Incidents/Site live inside the active mode's Advanced
+      disclosure; setPlanningMode() relocates this block into the matching slot. -->
+ <div id="planningTargetsFields">
+ <div class="subsection-label" style="margin-top: 10px;">Planning Realism</div>
  <div class="field-row">
  <div class="field">
  <label class="field-label">Coverage Target (%)</label>
@@ -581,6 +562,7 @@
  <label class="field-label">Min Incidents / Site</label>
  <input type="number" id="minIncidentsPerSite" value="2" min="1" max="25" step="1">
  <div class="field-desc">Avoids recommending a station for a single historical call</div>
+ </div>
  </div>
  </div>
  <button class="btn btn-primary" id="optimizeBtn" disabled>Compute Deployment</button>
@@ -858,6 +840,19 @@
  Built by the Autonomous Systems Center<br>
  Autonomous Systems Center - Dubai Police
  </div>
+
+ <div class="about-attribution">
+ <div class="about-eyebrow" style="margin-bottom: 6px;">BUILT WITH</div>
+ <p class="muted attribution-libs">
+ <a href="https://leafletjs.com/" target="_blank" rel="noopener noreferrer">Leaflet</a> ·
+ <a href="https://github.com/parallax/jsPDF" target="_blank" rel="noopener noreferrer">jsPDF</a> ·
+ <a href="https://html2canvas.hertzen.com/" target="_blank" rel="noopener noreferrer">html2canvas</a> ·
+ <a href="https://sheetjs.com/" target="_blank" rel="noopener noreferrer">SheetJS</a> ·
+ <a href="https://stuk.github.io/jszip/" target="_blank" rel="noopener noreferrer">JSZip</a>
+ </p>
+ <p class="muted attribution-tiles">Map tiles © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors, © <a href="https://carto.com/attributions" target="_blank" rel="noopener noreferrer">CARTO</a>.</p>
+ <p class="muted attribution-license">© UASC, Dubai Police, 2026. All rights reserved.</p>
+ </div>
  </div>
  </div>
 
@@ -875,6 +870,41 @@
  <button class="primary" id="aboutNext">Next -></button>
  </div>
  </div>
+ </div>
+</div>
+
+<!-- ============ SAMPLE DATA BANNER ============ -->
+<div id="sampleDataBanner" class="sample-banner" style="display:none;">
+ <span class="sample-banner-dot"></span>
+ <span id="sampleBannerText">Sample data loaded — for evaluation only</span>
+ <button class="sample-banner-clear" id="sampleBannerClear" type="button">Clear</button>
+</div>
+
+<!-- ============ FIRST-USE ONBOARDING MODAL ============ -->
+<div id="onboardingModal" class="onboarding-modal" style="display:none;">
+ <div class="onboarding-backdrop"></div>
+ <div class="onboarding-card">
+ <div class="onboarding-eyebrow">WELCOME</div>
+ <h2 id="onboardTitle">Welcome to the DFR Deployment Planner</h2>
+ <p id="onboardBody">Plan where to place DroneBox first-responder stations and how many drones each needs to meet your response-time targets. Choose your display preferences below — you can change them any time from the gear icon in the header.</p>
+ <div class="onboarding-fields">
+ <div class="field">
+ <label class="field-label" for="onboardUnits">Units</label>
+ <select id="onboardUnits">
+ <option value="metric" selected>Metric (km, m, m/s)</option>
+ <option value="imperial">Imperial (mi, ft, mph)</option>
+ </select>
+ </div>
+ <div class="field">
+ <label class="field-label" for="onboardDateFormat">Date format</label>
+ <select id="onboardDateFormat">
+ <option value="DD/MM/YYYY" selected>DD/MM/YYYY</option>
+ <option value="MM/DD/YYYY">MM/DD/YYYY</option>
+ <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+ </select>
+ </div>
+ </div>
+ <button class="btn btn-primary onboarding-continue" id="onboardContinue" type="button">Continue</button>
  </div>
 </div>
 
