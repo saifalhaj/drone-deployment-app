@@ -22,3 +22,10 @@
 - PDF structure check: 2 pages detected; text contains `Sensitivity Analysis` and the robust-core load explanation.
 - Visualization check: consensus overlay rendered marker icons; probability marker mode rendered marker icons after toggling. Both completed without browser exceptions.
 - High-load guardrail check: run produced robust-core load context text in UI because load exceeded 100%.
+
+## 2026-05-30 - Overhead Consolidation
+
+- Change: dispatch overhead is now a single global value (`planningModeState.globalOverhead`, default 15s) instead of a per-category `overheadSec` field. Overhead reflects platform tech (dock open, sensor warmup, climb) and organizational protocol (approvals, comms, safety checks, ATC callouts) — none of which depend on incident category, so effective fly-time per category is `categoryKPI - globalOverhead`.
+- UI: added "Dispatch Overhead (s)" to the Mission and Toolkit panel; removed the per-category overhead input from Step 02 cards (KPI retained). New global field reads/writes through `getGlobalOverheadSec()`.
+- Exports: JSON `mission_profile.dispatch_overhead_seconds` and the PDF mission-profile strip now record the global overhead; per-category `overhead_seconds` dropped from JSON (derived `effective_fly_time_seconds` retained).
+- Migration: loading a v1/v2 plan that carried per-category overhead and no explicit `globalOverhead` adopts the maximum per-category overhead as the new single global value (most conservative). A one-line `[DFR migration]` notice is logged to the console at load time. Newly saved plans use the v2 schema with a single `globalOverhead` at the planning-mode-state level.

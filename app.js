@@ -130,6 +130,10 @@
   function createDefaultPlanningModeState() {
     return {
       mode: PLANNING_MODE.SMOOTHED_GROWTH,
+      // Single dispatch overhead (seconds) applied uniformly across all incident
+      // categories — see getGlobalOverheadSec(). Replaces the former per-category
+      // overheadSec fields as of the v2 schema.
+      globalOverhead: 15,
       directFit: {
         coverageTargetPct: 90,
         minIncidentsPerSite: 2,
@@ -161,10 +165,15 @@
     const defaults = createDefaultPlanningModeState();
     if (!raw || typeof raw !== 'object') return defaults;
     const validMode = Object.values(PLANNING_MODE).includes(raw.mode) ? raw.mode : defaults.mode;
+    const rawOverhead = Number(raw.globalOverhead);
+    const globalOverhead = Number.isFinite(rawOverhead)
+      ? Math.max(0, Math.min(120, rawOverhead))
+      : defaults.globalOverhead;
     return {
       ...defaults,
       ...raw,
       mode: validMode,
+      globalOverhead,
       directFit: { ...defaults.directFit, ...(raw.directFit || {}) },
       smoothedGrowth: { ...defaults.smoothedGrowth, ...(raw.smoothedGrowth || {}) },
       monteCarlo: { ...defaults.monteCarlo, ...(raw.monteCarlo || {}) },
@@ -753,6 +762,7 @@
     planningModeState = mergePlanningModeState({
       ...planningModeState,
       mode: getSelectedPlanningMode(),
+      globalOverhead: getGlobalOverheadSec(),
       directFit: {
         ...planningModeState.directFit,
         coverageTargetPct: planning.coverageTargetPct,
@@ -790,6 +800,7 @@
     planningModeState = state;
     const sm = state.smoothedGrowth || {};
     const mc = state.monteCarlo || {};
+    setInputValue('dispatchOverhead', state.globalOverhead == null ? 15 : state.globalOverhead);
     setInputValue('growthMultiplier', sm.growthMultiplier || 1);
     setInputValue('kdeBandwidthMode', sm.bandwidthMode || 'auto-silverman');
     setInputValue('kdeBandwidthMeters', sm.bandwidthMeters || 1000);
@@ -831,6 +842,16 @@
         if (getSelectedPlanningMode() === PLANNING_MODE.MONTE_CARLO) clearRenderedDeployment();
       };
     });
+    const overheadEl = document.getElementById('dispatchOverhead');
+    if (overheadEl) {
+      overheadEl.onchange = function() {
+        syncPlanningModeStateFromControls();
+        updateRadius();
+        renderCategoriesList();
+        clearRenderedDeployment();
+      };
+      overheadEl.oninput = function() { updateRadius(); };
+    }
     wireMonteCarloDebugControls();
     setPlanningMode(state.mode, { silent: true, force: true });
   }
@@ -1121,6 +1142,7 @@
   // Expand placed sites with concurrency-driven unit sizing using actual timestamps.
   function applyConcurrency(sites, kpi, remainingByType, allIncidents) {
     const targets = getPriorityTargets();
+    const overhead = getGlobalOverheadSec();
     for (const s of sites) {
       const stationServiceMin = (s.serviceTimeMin != null) ? s.serviceTimeMin : kpi.serviceTimeMin;
       const serviceTimeHours = stationServiceMin / 60;
@@ -1128,8 +1150,6 @@
       s.serviceTimeMin = stationServiceMin;
       const cluster = (s.incidentIdx || []).map(idx => allIncidents[idx]).filter(Boolean);
       s.responseTimesSec = cluster.map(inc => {
-        const cat = getCategoryById(inc.priority);
-        const overhead = (cat && cat.overheadSec != null) ? cat.overheadSec : 15;
         return overhead + (haversine(s, inc) / Math.max(1, speedMs));
       }).sort((a, b) => a - b);
       if (s.responseTimesSec.length > 0) {
@@ -1722,10 +1742,9 @@
   const CATEGORY_COLOR_POOL = ['#e38b95', '#dce6ef', '#9fb4c8', '#b79cf2', '#8ea4b7', '#c7d5e1', '#6f8798', '#f2c1c7', '#7f6fb0', '#54697a'];
 
   let incidentCategories = [
-    // Default: one category, user adds more as needed.
-    // overheadSec = dock-open + sensor warmup + launch + climb to operating altitude.
-    // Subtracted from kpiSec before computing the coverage radius.
-    { id: 'cat_default', name: 'Critical', color: '#e38b95', kpiSec: 60, overheadSec: 15, serviceLevel: 0.95, weight: 1 }
+    // Default: one category, user adds more as needed. Dispatch overhead is a
+    // single global value (see getGlobalOverheadSec), not a per-category field.
+    { id: 'cat_default', name: 'Critical', color: '#e38b95', kpiSec: 60, serviceLevel: 0.95, weight: 1 }
   ];
 
   function getCategoryById(id) {
@@ -1758,7 +1777,6 @@
       name: seed.name || ('Category ' + String.fromCharCode(65 + idx)),
       color: seed.color || CATEGORY_COLOR_POOL[idx % CATEGORY_COLOR_POOL.length],
       kpiSec: seed.kpiSec != null ? seed.kpiSec : 90,
-      overheadSec: seed.overheadSec != null ? seed.overheadSec : 15,
       serviceLevel: seed.serviceLevel != null ? seed.serviceLevel : 0.90,
       weight: seed.weight != null ? seed.weight : 1
     });
@@ -1808,10 +1826,6 @@
             <input type="number" data-field="kpiSec" value="${c.kpiSec}" min="5" max="600">
           </div>
           <div class="field">
-            <label class="field-label" title="Dock-open + sensor warmup + launch + climb">Overhead (s)</label>
-            <input type="number" data-field="overheadSec" value="${c.overheadSec != null ? c.overheadSec : 15}" min="0" max="120">
-          </div>
-          <div class="field">
             <label class="field-label">Target (%)</label>
             <input type="number" data-field="serviceLevel" value="${Math.round(c.serviceLevel * 100)}" min="50" max="100" step="1">
           </div>
@@ -1820,7 +1834,7 @@
             <input type="number" data-field="weight" value="${c.weight}" min="0" step="0.5">
           </div>
         </div>
-        <div class="cat-mix-display">generates ~${mixPct}% of incidents · effective fly-time ${Math.max(0, c.kpiSec - (c.overheadSec != null ? c.overheadSec : 15))}s</div>
+        <div class="cat-mix-display">generates ~${mixPct}% of incidents · effective fly-time ${Math.max(0, c.kpiSec - getGlobalOverheadSec())}s</div>
       `;
       container.appendChild(card);
     });
@@ -1842,8 +1856,8 @@
         }
         else if (field === 'serviceLevel') cat.serviceLevel = (parseFloat(this.value) || 0) / 100;
         else cat[field] = parseFloat(this.value) || 0;
-        // Refresh the per-card "effective fly-time" footer whenever KPI or overhead changes
-        function effFly(c) { return Math.max(0, (c.kpiSec || 0) - (c.overheadSec != null ? c.overheadSec : 15)); }
+        // Refresh the per-card "effective fly-time" footer whenever KPI changes
+        function effFly(c) { return Math.max(0, (c.kpiSec || 0) - getGlobalOverheadSec()); }
         function rebuildMixDisplays() {
           const tot = incidentCategories.reduce((s, c) => s + Math.max(0, c.weight || 0), 0) || 1;
           container.querySelectorAll('.cat-card').forEach(card => {
@@ -1853,15 +1867,15 @@
               `generates ~${pct}% of incidents · effective fly-time ${effFly(cc)}s`;
           });
         }
-        if (field === 'weight' || field === 'kpiSec' || field === 'overheadSec') rebuildMixDisplays();
+        if (field === 'weight' || field === 'kpiSec') rebuildMixDisplays();
         // Re-render incidents to reflect color/name changes immediately
         if (field === 'color' || field === 'name') renderIncidents(null);
         if (field === 'color' || field === 'name' || field === 'weight') {
           populateHeatmapCategories();
           refreshHeatmap();
         }
-        // KPI seconds OR overhead affects the derived coverage radius
-        if (field === 'kpiSec' || field === 'overheadSec') updateRadius();
+        // KPI seconds affect the derived coverage radius (overhead is global now)
+        if (field === 'kpiSec') updateRadius();
       };
       inp.oninput = handler;
       inp.onchange = handler;
@@ -1889,11 +1903,25 @@
     return isFinite(strict) ? strict : 60;
   }
 
-  // Effective fly-time for a category: KPI minus dispatch/launch/climb overhead.
+  // Single global dispatch overhead (seconds): fixed time from the dispatch
+  // decision to the drone being airborne — platform tech (dock open, sensor
+  // warmup, climb to operating altitude) plus organizational protocol
+  // (approvals, comms, safety checks, ATC callouts). It does not depend on the
+  // incident category, so one value applies uniformly. Read from the Mission
+  // and Toolkit control, falling back to the saved planning-mode state.
+  function getGlobalOverheadSec() {
+    const el = document.getElementById('dispatchOverhead');
+    const fromInput = el ? parseFloat(el.value) : NaN;
+    const fromState = (planningModeState && planningModeState.globalOverhead != null)
+      ? planningModeState.globalOverhead : 15;
+    const v = Number.isFinite(fromInput) ? fromInput : fromState;
+    return Math.max(0, Math.min(120, v));
+  }
+
+  // Effective fly-time for a category: KPI minus the global dispatch overhead.
   // This is what the drone actually has available for horizontal travel.
   function effectiveFlyTimeSec(cat) {
-    const overhead = (cat.overheadSec != null) ? cat.overheadSec : 15;
-    return Math.max(0, (cat.kpiSec || 0) - overhead);
+    return Math.max(0, (cat.kpiSec || 0) - getGlobalOverheadSec());
   }
 
   // Strictest effective fly-time across categories — drives the geographic
@@ -4415,22 +4443,12 @@
     const display = formatDistance(radius);
     const el = document.getElementById('radiusDisplay');
     if (el) {
-      const overheadNote = isManual ? ' (manual)' : ` (after ${getMaxOverheadSec()}s overhead)`;
+      const overheadNote = isManual ? ' (manual)' : ` (after ${getGlobalOverheadSec()}s overhead)`;
       el.textContent = display + overheadNote;
     }
     return radius;
   }
 
-  // Largest overhead across categories — shown alongside the radius display
-  // so the user sees what's been subtracted from KPI.
-  function getMaxOverheadSec() {
-    let max = 0;
-    for (const c of incidentCategories) {
-      const o = (c.overheadSec != null) ? c.overheadSec : 15;
-      if (o > max) max = o;
-    }
-    return max;
-  }
   function dropPresetToCustom() {
     const sel = document.getElementById('minimizePreset');
     if (sel && sel.value !== 'custom') {
@@ -4828,6 +4846,7 @@
       mission_profile: {
         incident_period_h: kpi.periodHours,
         service_time_min: kpi.serviceTimeMin,
+        dispatch_overhead_seconds: getGlobalOverheadSec(),
         geographic_coverage_target: planning.coverageTarget,
         min_incidents_per_site: planning.minIncidentsPerSite,
         planning_mode: getSelectedPlanningMode(),
@@ -4845,7 +4864,6 @@
         name: c.name,
         color: c.color,
         kpi_seconds: c.kpiSec,
-        overhead_seconds: c.overheadSec != null ? c.overheadSec : 15,
         effective_fly_time_seconds: effectiveFlyTimeSec(c),
         service_level_target: c.serviceLevel,
         weight: c.weight
@@ -6764,7 +6782,7 @@
         modeBits.push(`BW ${formatDistance(lastPlanningResultMeta.demandGrid.bandwidthMeters)}`);
       }
       const profileLoadLabel = isMonteCarloPdf ? `Robust Core Load: ${mcRobustCoreLoad.toFixed(0)}%` : `Load: ${networkLoad.loadPct.toFixed(0)}%`;
-      const profileLine = `Mode: ${modeBits.join(' / ')} | Categories: ${targetsStr} | Window: ${windowLabel} | Service Time: ${kpi.serviceTimeMin}min | ${profileLoadLabel} | Queue: ${networkLoad.queueRiskPct.toFixed(0)}% | Geo Target: ${planning.coverageTargetPct.toFixed(0)}% | Min/Site: ${planning.minIncidentsPerSite} | Area: ${formatArea(areaKm2)} | Incidents: ${incidents.length} | No-Fly: ${noFlyZones.length} | No-Deploy: ${noDeployZones.length} | Water: ${waterZones.length}`;
+      const profileLine = `Mode: ${modeBits.join(' / ')} | Categories: ${targetsStr} | Window: ${windowLabel} | Service Time: ${kpi.serviceTimeMin}min | Dispatch Overhead: ${getGlobalOverheadSec()}s | ${profileLoadLabel} | Queue: ${networkLoad.queueRiskPct.toFixed(0)}% | Geo Target: ${planning.coverageTargetPct.toFixed(0)}% | Min/Site: ${planning.minIncidentsPerSite} | Area: ${formatArea(areaKm2)} | Incidents: ${incidents.length} | No-Fly: ${noFlyZones.length} | No-Deploy: ${noDeployZones.length} | Water: ${waterZones.length}`;
       pdf.text(profileLine, M, y);
       text(T.text);
       y += 4;
@@ -7068,6 +7086,11 @@
   }
 
   function loadSavedPlan(plan) {
+    // Detect whether this plan predates the single global overhead, before
+    // normalizeSavedPlanEnvelope() fills in a default. Used to migrate the
+    // legacy per-category overhead fields to one global value below.
+    const hadExplicitGlobalOverhead = !!(plan && plan.planningModeState
+      && plan.planningModeState.globalOverhead != null);
     plan = normalizeSavedPlanEnvelope(plan);
     if (!plan || (plan.fileType && plan.fileType !== 'uasc-dfr-plan')) {
       throw new Error('Unsupported plan file');
@@ -7114,10 +7137,25 @@
         name: c.name || 'Category',
         color: c.color || CATEGORY_COLOR_POOL[0],
         kpiSec: c.kpi_seconds != null ? c.kpi_seconds : (c.kpiSec != null ? c.kpiSec : 60),
-        overheadSec: c.overhead_seconds != null ? c.overhead_seconds : (c.overheadSec != null ? c.overheadSec : 15),
         serviceLevel: c.service_level_target != null ? c.service_level_target : (c.serviceLevel != null ? c.serviceLevel : 0.95),
         weight: c.weight != null ? c.weight : 1
       }));
+
+      // Backward compatibility: v1/v2 plans stored overhead per category. When a
+      // plan has no explicit global overhead, adopt the maximum per-category
+      // overhead as the single global value (the most conservative migration).
+      if (!hadExplicitGlobalOverhead) {
+        const legacyOverheads = plan.incident_categories
+          .map(c => c.overhead_seconds != null ? c.overhead_seconds : (c.overheadSec != null ? c.overheadSec : null))
+          .filter(v => Number.isFinite(v));
+        if (legacyOverheads.length > 0) {
+          const migrated = Math.max.apply(null, legacyOverheads);
+          planningModeState = mergePlanningModeState({ ...planningModeState, globalOverhead: migrated });
+          setInputValue('dispatchOverhead', planningModeState.globalOverhead);
+          console.info('[DFR migration] Per-category overhead removed; adopted single global Dispatch Overhead = '
+            + planningModeState.globalOverhead + 's (max across ' + legacyOverheads.length + ' categories).');
+        }
+      }
       renderCategoriesList();
     }
     populateHeatmapCategories();

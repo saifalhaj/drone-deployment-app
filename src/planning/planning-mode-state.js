@@ -12,6 +12,9 @@
   function createDefaultPlanningModeState() {
     return {
       mode: PLANNING_MODE.SMOOTHED_GROWTH,
+      // Single dispatch overhead (seconds) applied uniformly across all incident
+      // categories. Replaces the former per-category overheadSec fields (v2).
+      globalOverhead: 15,
       directFit: {
         coverageTargetPct: 90,
         minIncidentsPerSite: 2,
@@ -44,10 +47,15 @@
     if (!raw || typeof raw !== 'object') return defaults;
     const modes = Object.keys(PLANNING_MODE).map(key => PLANNING_MODE[key]);
     const validMode = modes.indexOf(raw.mode) >= 0 ? raw.mode : defaults.mode;
+    const rawOverhead = Number(raw.globalOverhead);
+    const globalOverhead = Number.isFinite(rawOverhead)
+      ? Math.max(0, Math.min(120, rawOverhead))
+      : defaults.globalOverhead;
     return {
       ...defaults,
       ...raw,
       mode: validMode,
+      globalOverhead,
       directFit: { ...defaults.directFit, ...(raw.directFit || {}) },
       smoothedGrowth: { ...defaults.smoothedGrowth, ...(raw.smoothedGrowth || {}) },
       monteCarlo: { ...defaults.monteCarlo, ...(raw.monteCarlo || {}) },

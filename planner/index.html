@@ -78,6 +78,13 @@
  <button class="mode-tab" data-mode="fleet">Deploy Existing</button>
  </div>
 
+ <div class="subsection-label" style="margin-top: 12px;">Dispatch</div>
+ <div class="field">
+ <label class="field-label" title="Fixed time from dispatch decision to drone airborne">Dispatch Overhead (s)</label>
+ <input type="number" id="dispatchOverhead" value="15" min="0" max="120">
+ <div class="field-desc">Fixed time from dispatch decision to drone airborne, set by platform tech (dock open, sensor warmup, climb) and organizational protocol (approvals, comms, safety checks, ATC callouts). Applies uniformly across all incident categories and is subtracted from each category's KPI to compute effective fly-time.</div>
+ </div>
+
  <!-- MINIMIZE MODE -->
  <div id="minimizePanel">
  <div class="field">
@@ -268,7 +275,7 @@
 
  <div class="subsection-label" style="margin-top: 14px;">
  Incident KPIs
- <span class="hint">name - KPI - overhead - target - weight</span>
+ <span class="hint">name - KPI - target - weight</span>
  </div>
  <p class="help" style="font-size: 11px; line-height: 1.45;">One row per incident class. Each category has its own response-time KPI and service-level target; the optimizer sizes each cluster to meet all targets simultaneously. Weight drives both auto-generation probability and the greedy priority of geographic siting.</p>
  <div id="categoriesList" class="categories-list"></div>
