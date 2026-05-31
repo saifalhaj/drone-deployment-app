@@ -167,6 +167,13 @@
   function i18nTextDict() {
     return (typeof window !== 'undefined' && window.DFR_I18N_AR && window.DFR_I18N_AR.text) || {};
   }
+  // Source-level translate for JS-built strings (those interpolate values, so the
+  // DOM translator can't dictionary-match them). Returns the Arabic for an exact
+  // English fragment when Arabic is active, else the English unchanged.
+  function tr(en) {
+    const d = i18nTextDict();
+    return (currentLang === 'ar' && d[en]) ? d[en] : en;
+  }
   // Records of translated text nodes so English can be restored on switch-back.
   let i18nTextRecords = [];
   function translateAttr(root, dict, attr, dsKey) {
@@ -179,10 +186,22 @@
       }
     });
   }
-  function translateDomTree(root, dict) {
-    if (!root) return;
-    // Walk TEXT nodes (not just leaf elements) so mixed text+element content
-    // translates too — e.g. the step-rail rows and "<span></span>SYSTEM READY".
+  // Translate one text node in place. Splits into leading / core / trailing
+  // whitespace and collapses the core's internal whitespace so multi-line,
+  // indented paragraphs match single-spaced keys; outer whitespace is kept so
+  // inline siblings don't jam together. Records the original for restore.
+  function translateOneTextNode(node, dict) {
+    const raw = node.nodeValue || '';
+    const m = raw.match(/^(\s*)([\s\S]*?)(\s*)$/);
+    const key = m[2].replace(/\s+/g, ' ');
+    if (key && dict[key]) {
+      i18nTextRecords.push({ node, en: raw });
+      node.nodeValue = m[1] + dict[key] + m[3];
+    }
+  }
+  // Translate every text node + known attribute under an element subtree.
+  function translateSubtree(root, dict) {
+    if (!root || root.nodeType !== 1 || I18N_SKIP_TAGS.test(root.nodeName)) return;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
     const nodes = [];
     let n;
@@ -190,22 +209,46 @@
       const parent = n.parentNode;
       if (parent && !I18N_SKIP_TAGS.test(parent.nodeName)) nodes.push(n);
     }
-    for (const node of nodes) {
-      const raw = node.nodeValue || '';
-      // Split into leading whitespace / core / trailing whitespace, and collapse
-      // the core's internal whitespace so multi-line, indented paragraphs match
-      // the single-spaced dictionary keys. Leading/trailing whitespace is kept so
-      // inline siblings don't jam together.
-      const m = raw.match(/^(\s*)([\s\S]*?)(\s*)$/);
-      const key = m[2].replace(/\s+/g, ' ');
-      if (key && dict[key]) {
-        i18nTextRecords.push({ node, en: raw });
-        node.nodeValue = m[1] + dict[key] + m[3];
-      }
-    }
+    for (const node of nodes) translateOneTextNode(node, dict);
     translateAttr(root, dict, 'placeholder', 'i18nPh');
     translateAttr(root, dict, 'title', 'i18nTitle');
     translateAttr(root, dict, 'aria-label', 'i18nAl');
+  }
+  function translateDomTree(root, dict) {
+    translateSubtree(root, dict);
+  }
+  // Re-translate dynamically-rendered content (category cards, status lines,
+  // stats, station report, compute results) while Arabic is active, so JS-built
+  // chrome doesn't reappear in English after a re-render. Scoped to the sidebar
+  // so the Leaflet map's tile churn doesn't trigger needless work. Arabic output
+  // never matches an English dict key, so applying a translation can't loop.
+  let i18nObserver = null;
+  function startI18nObserver() {
+    if (i18nObserver) return;
+    const target = document.getElementById('sidebar') || document.body;
+    const dict = i18nTextDict();
+    i18nObserver = new MutationObserver(muts => {
+      for (const mut of muts) {
+        if (mut.type === 'childList') {
+          mut.addedNodes.forEach(node => {
+            if (node.nodeType === 3) {
+              const p = node.parentNode;
+              if (p && !I18N_SKIP_TAGS.test(p.nodeName)) translateOneTextNode(node, dict);
+            } else if (node.nodeType === 1) {
+              translateSubtree(node, dict);
+            }
+          });
+        } else if (mut.type === 'characterData') {
+          const node = mut.target;
+          const p = node.parentNode;
+          if (p && !I18N_SKIP_TAGS.test(p.nodeName)) translateOneTextNode(node, dict);
+        }
+      }
+    });
+    i18nObserver.observe(target, { childList: true, subtree: true, characterData: true });
+  }
+  function stopI18nObserver() {
+    if (i18nObserver) { i18nObserver.disconnect(); i18nObserver = null; }
   }
   function restoreEnglishTree(root) {
     for (const r of i18nTextRecords) { try { r.node.nodeValue = r.en; } catch (e) { /* node detached */ } }
@@ -218,10 +261,13 @@
   function applyLanguage(lang) {
     currentLang = (lang === 'ar') ? 'ar' : 'en';
     const root = document.body;
-    if (currentLang === 'ar') translateDomTree(root, i18nTextDict());
-    else restoreEnglishTree(root);
+    if (currentLang === 'ar') { translateDomTree(root, i18nTextDict()); startI18nObserver(); }
+    else { stopI18nObserver(); restoreEnglishTree(root); }
     document.documentElement.setAttribute('lang', currentLang);
     document.documentElement.setAttribute('dir', 'ltr'); // Level 1: no RTL layout flip
+    // Re-render tr()-based computed strings so they reflect the new language
+    // (the DOM translator can't dictionary-match interpolated values).
+    if (typeof updateMixSumIndicator === 'function') updateMixSumIndicator();
     const sel = document.getElementById('langSelect');
     if (sel && sel.value !== currentLang) sel.value = currentLang;
     saveStoredSettings();
@@ -2083,10 +2129,10 @@
     const rounded = Math.round(sumPct * 10) / 10;
     const display = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
     if (Math.abs(rounded - 100) < 0.05) {
-      el.textContent = `Sum: ${display}%`;
+      el.textContent = `${tr('Sum:')} ${display}%`;
       el.className = 'cat-mix-sum ok';
     } else {
-      el.textContent = `Sum: ${display}% (should equal 100%)`;
+      el.textContent = `${tr('Sum:')} ${display}% ${tr('(should equal 100%)')}`;
       el.className = 'cat-mix-sum warn';
     }
   }
