@@ -24,7 +24,6 @@
  <div class="mission-strip">
  <span><b>OP //</b> OP-2026-0341</span>
  <span><b>TS //</b> <span id="utcClock">UTC --:--:--</span></span>
- <span><b>OPR //</b> CMD/UASC</span>
  <span><b>CLS //</b> CONFIDENTIAL</span>
  </div>
  <div class="header-actions">
@@ -51,6 +50,14 @@
  <option value="DD/MM/YYYY" selected>DD/MM/YYYY</option>
  <option value="MM/DD/YYYY">MM/DD/YYYY</option>
  <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+ </select>
+ </div>
+ <div class="field">
+ <label class="field-label" for="coordFormat">Coordinates</label>
+ <select id="coordFormat">
+ <option value="decimal" selected>Decimal degrees</option>
+ <option value="dms">DMS</option>
+ <option value="utm">UTM grid</option>
  </select>
  </div>
  </div>
@@ -140,16 +147,6 @@
  <span>Effective Coverage Radius</span>
  <span class="derived-value" id="radiusDisplay">1200 m</span>
  </div>
- <div class="subsection-label" style="margin-top: 12px;">Localization</div>
- <div class="field">
- <label class="field-label">Coordinates</label>
- <select id="coordFormat">
- <option value="decimal" selected>Decimal degrees</option>
- <option value="dms">DMS</option>
- <option value="utm">UTM grid</option>
- </select>
- <div class="field-desc">Units (metric/imperial) and date format are in <strong>Settings</strong> (gear icon, top-right)</div>
- </div>
  <div id="minimizePresetNote" class="type-notes" style="margin-top: 4px;"></div>
  </div>
 
@@ -168,6 +165,14 @@
  <span class="panel-title">Define Operational Area</span>
  </div>
  <p class="help">Choose how to define the operational area. Add <strong>No-Fly Zones</strong> (drones cannot enter) and <strong>No-Deploy Zones</strong> (stations cannot be placed, but drones may still fly through). Each layer can be saved as KMZ for reuse.</p>
+
+ <div class="sample-callout">
+ <div class="sample-callout-text">
+ <strong>Just exploring?</strong>
+ <span>Load a ready-made "Sample City" — area + incidents — and run the full workflow end-to-end.</span>
+ </div>
+ <button class="btn btn-secondary" type="button" id="loadSampleBtn">Load sample dataset</button>
+ </div>
 
  <div class="subsection-label">Operational Area</div>
  <div class="mode-tabs area-method-tabs" role="group" aria-label="Operational area source">
@@ -255,9 +260,8 @@
 
  <div class="subsection-label" style="margin-top: 14px;">
  <span><span class="layer-swatch" style="background:#7CDCE8;"></span> Water Exclusion</span>
- <span class="hint">stations not allowed over water</span>
+ <span class="hint">stations not allowed - drones may fly</span>
  </div>
- <p class="help" style="font-size: 11px;">Upload water polygons from Natural Earth, OpenStreetMap/Geofabrik, or local hydrography data. These areas only block station placement.</p>
  <div class="field-row" style="margin-bottom: 6px;">
  <button class="btn btn-secondary" id="loadNaturalEarthWater">Load Built-in Water</button>
  <label class="btn btn-secondary" style="text-align:center;cursor:pointer;">
@@ -301,7 +305,6 @@
  Incident KPIs
  <span class="hint">name - KPI - target - weight</span>
  </div>
- <p class="help" style="font-size: 11px; line-height: 1.45;">One row per incident class. Each category has its own response-time KPI and service-level target; the optimizer sizes each cluster to meet all targets simultaneously. Weight drives both auto-generation probability and the greedy priority of geographic siting.</p>
  <div id="categoriesList" class="categories-list"></div>
  <button class="btn btn-secondary" id="addCategoryBtn" style="margin-top: 6px;">+ Add Category</button>
 
@@ -310,7 +313,6 @@
  <button class="mode-tab" data-source="upload">Upload</button>
  </div>
 
- <p class="help sample-data-line" style="font-size: 11px;">New here? <button type="button" class="text-link" id="loadSampleBtn">Load sample dataset</button> — a fake "Sample City" with a realistic incident set to try the tool end-to-end.</p>
 
  <div id="generateSourcePanel">
  <div class="field">
@@ -330,7 +332,7 @@
  <option value="perimeter">Perimeter Bias</option>
  <option value="multi-corridor">Multi-Corridor</option>
  <option value="grid">Neighborhood Grid</option>
- <option value="mixed">Mixed Urban Demand</option>
+ <option value="mixed" selected>Mixed Urban Demand</option>
  </select>
  </div>
  </details>
@@ -358,7 +360,7 @@
  <span>Incident Statistics</span>
  <button class="btn btn-ghost btn-inline" id="exportIncidentsBtn">Export CSV</button>
  </div>
- <p class="stats-blurb">What the optimizer is actually working with. Use these to sanity-check your data before computing the deployment.</p>
+ <p class="stats-blurb">A summary of the incident data driving the plan. Review volume, concurrency, and spatial-temporal spread before computing the deployment.</p>
 
  <div class="stats-grid">
  <div class="stat-cell">
@@ -381,12 +383,12 @@
  <div class="stat-value" id="stat-interval">-</div>
  <div class="stat-desc">Time between consecutive incidents</div>
  </div>
- <div class="stat-cell stat-cell-wide">
+ <div class="stat-cell">
  <div class="stat-label">Busiest Period</div>
  <div class="stat-value" id="stat-peak">-</div>
  <div class="stat-desc">When the highest concentration of incidents occurred</div>
  </div>
- <div class="stat-cell">
+ <div class="stat-cell stat-cell-key">
  <div class="stat-label">Peak Concurrent</div>
  <div class="stat-value" id="stat-concurrent">-</div>
  <div class="stat-desc">Max simultaneous active incidents (drives unit sizing)</div>
@@ -424,7 +426,7 @@
  <span class="step-tag">STEP 03</span>
  <span class="panel-title">Compute Deployment</span>
  </div>
- <p class="help">Runs the time-aware optimizer using your Mission and Toolkit settings, area, and incident pattern. Stations are sized to handle observed concurrent demand - not just average load.</p>
+ <p class="help">Pick a planning approach, then compute where to place stations and how many drones each needs to meet your response-time KPIs.</p>
  <div class="subsection-label">Planning Mode</div>
  <div class="mode-tabs planning-mode-tabs" role="group" aria-label="Planning mode">
  <button class="mode-tab active" type="button" data-planning-mode="smoothed-growth">Smoothed Demand</button>
@@ -433,12 +435,14 @@
  </div>
  <div class="status-line" id="directFitWarning" style="display:none;">Direct Fit places stations around the exact incidents loaded in this session. It is useful for forensic review, fixed-event planning, and explaining how a known historical period would have been covered. It is not suitable for procurement planning or annual deployment sizing because it can overfit isolated calls, missing records, and random historical noise. For station investment decisions, use Smoothed Demand + Growth or Monte Carlo.</div>
  <div id="directFitPanel" style="display:none;">
+ <p class="help mode-brief">Places stations around the exact incidents you loaded. Best for reviewing a specific past period or event — not for long-term procurement, since it can overfit one-off calls.</p>
  <details class="advanced-settings" id="directFitAdvanced">
  <summary>Advanced</summary>
  <div class="advanced-targets-slot" data-targets-slot></div>
  </details>
  </div>
  <div id="smoothedGrowthPanel">
+ <p class="help mode-brief">Smooths your incidents into demand hotspots and plans around the overall pattern. Best for everyday capacity planning and procurement — robust to noise and missing records.</p>
  <div class="field">
  <label class="field-label">Demand Growth Scenario</label>
  <select id="growthMultiplier">
@@ -447,7 +451,7 @@
  <option value="1.5">+50% volume</option>
  <option value="2">+100% volume</option>
  </select>
- <div class="field-desc">Scales load and unit sizing; station placement stays based on current demand pattern</div>
+ <div class="field-desc">Expected growth in incident volume over the planning period. Factored into unit sizing and recommendations; station placement stays anchored to today's demand pattern. Use +0% for steady state, higher for growing demand.</div>
  </div>
  <details class="advanced-settings" id="smoothedAdvanced">
  <summary>Advanced planning settings</summary>
@@ -481,6 +485,7 @@
  </details>
  </div>
  <div id="monteCarloPanel" style="display:none;">
+ <p class="help mode-brief">Simulates many possible futures from your demand pattern and keeps the stations that show up most often. Best when you want confidence that a plan holds up across different scenarios, not just one.</p>
  <div class="field-row">
  <div class="field">
  <label class="field-label">Monte Carlo Runs</label>
@@ -731,8 +736,8 @@
  <!-- Page 1: What it does + how you use it -->
  <div class="about-page active" data-page="0">
  <div class="about-eyebrow">WHAT THIS TOOL IS</div>
- <h2>Plans where to put DroneBox stations.</h2>
- <p>When an emergency call comes in, the nearest DroneBox launches automatically and arrives on scene before patrol units. This tool decides how many stations you need and where to put them.</p>
+ <h2>Plans where to deploy drone-response stations.</h2>
+ <p>When an emergency call comes in, the nearest station launches automatically and arrives on scene before patrol units. This open planning tool decides how many stations you need and where to put them — for any drone platform or dock, not a specific vendor.</p>
  <div class="about-illus">
  <svg viewBox="0 0 520 180" xmlns="http://www.w3.org/2000/svg">
  <defs>
@@ -768,15 +773,19 @@
  <div class="about-numbered">
  <div class="about-step-row">
  <div class="about-step-num">1</div>
- <div class="about-step-body"><strong>Draw the operational area</strong></div>
+ <div class="about-step-body"><strong>Define the operational area</strong></div>
  </div>
  <div class="about-step-row">
  <div class="about-step-num">2</div>
- <div class="about-step-body"><strong>Set incident KPIs and upload or generate data</strong></div>
+ <div class="about-step-body"><strong>Add incident data and set response KPIs</strong></div>
  </div>
  <div class="about-step-row">
  <div class="about-step-num">3</div>
- <div class="about-step-body"><strong>Compute and export the deployment plan</strong></div>
+ <div class="about-step-body"><strong>Compute the deployment plan</strong></div>
+ </div>
+ <div class="about-step-row">
+ <div class="about-step-num">4</div>
+ <div class="about-step-body"><strong>Export the report and handoff files</strong></div>
  </div>
  </div>
  </div>
@@ -788,11 +797,11 @@
  <div class="about-cards">
  <div class="about-card-small">
  <div class="ac-label">WHERE</div>
- <div class="ac-text">Greedy maximum-coverage: place each station where it covers the most incidents not already covered, respecting no-fly zones.</div>
+ <div class="ac-text">Cover the most demand first, respecting no-fly and no-deploy zones. Choose how demand is modeled: smoothed hotspots with a growth projection, the exact historical incidents, or many simulated futures (Monte Carlo).</div>
  </div>
  <div class="about-card-small">
  <div class="ac-label">HOW MANY</div>
- <div class="ac-text">Time-aware simulation: when calls overlap, the simulation grows the drone count at each site until every category hits its target.</div>
+ <div class="ac-text">A time-aware simulation grows the number of drones at each site until every incident category meets its response-time target. One dispatch overhead (launch + climb) is subtracted from each KPI.</div>
  </div>
  </div>
  <div class="about-illus">
@@ -820,7 +829,7 @@
  </div>
  <div>
  <div class="about-eyebrow" style="margin-bottom: 6px;">HONEST LIMITS</div>
- <p class="muted" style="margin-top: 0;">Straight-line paths - constant mission duration - no weather downtime. Use real flight logs to calibrate before procurement.</p>
+ <p class="muted" style="margin-top: 0;">Straight-line flight paths · constant service time per call · no weather downtime. Projections are only as good as the incident data — calibrate with real flight logs before procurement.</p>
  </div>
  </div>
 
@@ -837,8 +846,8 @@
  <hr class="about-closing-divider">
  <p class="about-closing">The future of DFR should not depend on guesswork. It should be planned, measured, and built around the communities it is meant to serve.</p>
  <div class="signature">
- Built by the Autonomous Systems Center<br>
- Autonomous Systems Center - Dubai Police
+ Built by the Unmanned Aerial Systems Center<br>
+ Unmanned Aerial Systems Center - Dubai Police
  </div>
 
  <div class="about-attribution">

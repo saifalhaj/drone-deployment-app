@@ -1935,19 +1935,18 @@
         </div>
         <div class="cat-fields">
           <div class="field">
-            <label class="field-label">KPI (s)</label>
+            <label class="field-label" title="Target response time for this category, from dispatch to on-scene">Response KPI (s)</label>
             <input type="number" data-field="kpiSec" value="${c.kpiSec}" min="5" max="600">
           </div>
           <div class="field">
-            <label class="field-label">Target (%)</label>
+            <label class="field-label" title="Share of this category's incidents that must meet the KPI">Response Target (%)</label>
             <input type="number" data-field="serviceLevel" value="${Math.round(c.serviceLevel * 100)}" min="50" max="100" step="1">
           </div>
           <div class="field">
-            <label class="field-label">Weight</label>
+            <label class="field-label" title="Relative frequency — drives this category's share of generated incidents and its siting priority">Occurrence</label>
             <input type="number" data-field="weight" value="${c.weight}" min="0" step="0.5">
           </div>
         </div>
-        <div class="cat-mix-display">generates ~${mixPct}% of incidents · effective fly-time ${Math.max(0, c.kpiSec - getGlobalOverheadSec())}s</div>
       `;
       container.appendChild(card);
     });
@@ -1969,18 +1968,6 @@
         }
         else if (field === 'serviceLevel') cat.serviceLevel = (parseFloat(this.value) || 0) / 100;
         else cat[field] = parseFloat(this.value) || 0;
-        // Refresh the per-card "effective fly-time" footer whenever KPI changes
-        function effFly(c) { return Math.max(0, (c.kpiSec || 0) - getGlobalOverheadSec()); }
-        function rebuildMixDisplays() {
-          const tot = incidentCategories.reduce((s, c) => s + Math.max(0, c.weight || 0), 0) || 1;
-          container.querySelectorAll('.cat-card').forEach(card => {
-            const cc = getCategoryById(card.dataset.id);
-            const pct = ((Math.max(0, cc.weight || 0) / tot) * 100).toFixed(1);
-            card.querySelector('.cat-mix-display').textContent =
-              `generates ~${pct}% of incidents · effective fly-time ${effFly(cc)}s`;
-          });
-        }
-        if (field === 'weight' || field === 'kpiSec') rebuildMixDisplays();
         // Re-render incidents to reflect color/name changes immediately
         if (field === 'color' || field === 'name') renderIncidents(null);
         if (field === 'color' || field === 'name' || field === 'weight') {
@@ -2536,6 +2523,21 @@
     const standoff = demandPoints.map(p => hasNoFly ? standoffPoint(p) : p);
     const candidateOk = demandPoints.map(p => canDeployStation(p));
 
+    // Performance bound: the greedy is O(stations · candidates · cells) with a
+    // haversine per pair, so a fine grid over a large/dense area can explode and
+    // appear to hang. A station is almost always best centered on a high-demand
+    // cell, so restrict candidate ORIGINS to the highest-weight deployable cells.
+    // Coverage is still evaluated against every cell, so results barely change.
+    const MAX_CANDIDATE_ORIGINS = 600;
+    let candidateOrigins = [];
+    for (let i = 0; i < n; i++) if (candidateOk[i]) candidateOrigins.push(i);
+    if (candidateOrigins.length > MAX_CANDIDATE_ORIGINS) {
+      candidateOrigins.sort((a, b) => (Number(demandPoints[b].weight) || 0) - (Number(demandPoints[a].weight) || 0));
+      candidateOrigins = candidateOrigins.slice(0, MAX_CANDIDATE_ORIGINS);
+      console.info('[DFR] Smoothed Demand: capped candidate station origins to top '
+        + MAX_CANDIDATE_ORIGINS + ' of ' + n + ' demand cells for performance.');
+    }
+
     function radiusFor(point, type) {
       const cat = getCategoryById(point.priority);
       const speed = type ? ((Number(type.speedKmh) || 60) / 3.6) : speedMs;
@@ -2562,8 +2564,7 @@
       if (availableTypes.length === 0) break;
       let best = { idx: -1, type: null, set: [], weight: 0 };
       for (const type of availableTypes) {
-        for (let i = 0; i < n; i++) {
-          if (!candidateOk[i]) continue;
+        for (const i of candidateOrigins) {
           const candidate = candidateSetFor(i, type, demandPoints[i]);
           if (candidate.weight > best.weight || (candidate.weight === best.weight && candidate.set.length > best.set.length)) {
             best = { idx: i, type, set: candidate.set, weight: candidate.weight };
@@ -2744,8 +2745,16 @@
       throw new Error('Smoothed Demand needs incident data. Load an incident file or generate incidents first.');
     }
     const grid = buildDemandGrid(incidents, settings);
-    const demandPoints = demandGridToPoints(grid);
+    let demandPoints = demandGridToPoints(grid);
     if (demandPoints.length === 0) throw new Error('Smoothed Demand produced no active demand cells inside the operational area.');
+    // Safety bound for very fine grids over large/dense areas: keep the highest-
+    // weight cells (the dropped tail carries negligible demand) so the optimizer
+    // stays responsive. The heatmap still renders the full demand grid.
+    const MAX_DEMAND_CELLS = 5000;
+    if (demandPoints.length > MAX_DEMAND_CELLS) {
+      demandPoints = demandPoints.slice().sort((a, b) => (Number(b.weight) || 0) - (Number(a.weight) || 0)).slice(0, MAX_DEMAND_CELLS);
+      console.info('[DFR] Smoothed Demand: using top ' + MAX_DEMAND_CELLS + ' of ' + grid.activeCells.length + ' demand cells for performance.');
+    }
     const result = greedyWeightedDemandCoverage(
       demandPoints,
       updateRadius(),
@@ -3522,13 +3531,17 @@
       const cells = lastDemandGrid.activeCells;
       if (cells.length === 0) return;
       const zoom = map.getZoom();
-      const radius = Math.max(12, Math.min(42, 12 + zoom * 1.2));
+      const radius = Math.max(10, Math.min(34, 10 + zoom));
       const maxWeight = Math.max(1e-9, ...cells.map(c => Number(c.normalizedWeight) || 0));
       ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
+      // Densely-packed KDE cells bloom to white under additive 'lighter'. Use the
+      // softer 'screen' blend with low intensity/alpha so the demand heatmap reads
+      // as a calm cyan gradient rather than an overwhelming white glare.
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = 0.4;
       for (const cell of cells) {
         const p = map.latLngToContainerPoint([cell.lat, cell.lng]);
-        const intensity = Math.max(0.18, Math.min(1.25, (Number(cell.normalizedWeight) || 0) / maxWeight));
+        const intensity = Math.max(0.1, Math.min(0.45, (Number(cell.normalizedWeight) || 0) / maxWeight));
         drawHeatSpot(ctx, p.x, p.y, radius, '#7CDCE8', intensity);
       }
       ctx.restore();
@@ -3776,7 +3789,7 @@
         (s.loadMetrics ? `Expected load: ${(s.loadMetrics.loadPct || 0).toFixed(0)}% (${s.loadMetrics.riskLevel || 'Low'})<br>` : '') +
         (s.loadMetrics ? `Queue risk: ${(s.loadMetrics.queueRiskPct || 0).toFixed(0)}%<br>` : '') +
         `Radius: ${radiusLabel}<br>` +
-        (s.serviceTimeMin != null ? `Cycle time: ${s.serviceTimeMin} min<br>` : '') +
+        (s.serviceTimeMin != null ? `Service time: ${s.serviceTimeMin} min<br>` : '') +
         `Overall service level: ${svc}<br>` +
         formatCoordinate(s.lat, s.lng);
       L.marker([s.lat, s.lng], { icon })
@@ -4106,7 +4119,7 @@
           <span>Peak hour <b>${formatHourLabel(load.peakHour)} (${load.peakHourCount || 0})</b></span>
           <span>Overlap risk <b>${(load.overlapRiskPct || 0).toFixed(0)}%</b></span>
           <span>Queued <b>${load.queuedIncidents || 0}</b></span>
-          <span>Cycle impact <b>${load.serviceTimeMin || s.serviceTimeMin || getKpiParams().serviceTimeMin} min</b></span>
+          <span>Service time <b>${load.serviceTimeMin || s.serviceTimeMin || getKpiParams().serviceTimeMin} min</b></span>
           <span>Worst delay <b>${(load.maxDelayMin || 0).toFixed(1)} min</b></span>
         </div>
       </div>
@@ -5404,7 +5417,7 @@
             <input type="number" value="${t.speedKmh}" min="5" max="200" data-field="speedKmh">
           </div>
           <div class="field">
-            <label class="field-label">Cycle (min)</label>
+            <label class="field-label">Service Time (min)</label>
             <input type="number" value="${t.serviceTimeMin}" min="1" max="180" data-field="serviceTimeMin">
           </div>
         </div>

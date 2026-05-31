@@ -39,7 +39,7 @@
           deploy with confidence.
         </h1>
         <p>
-          Turn incident history into a defensible DroneBox deployment plan:
+          Turn incident history into a defensible drone-response deployment plan:
           sites, units, coverage, and KPI performance in one mission workflow.
         </p>
         <div class="home-actions">
@@ -75,7 +75,6 @@
         <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
         <div class="hud hud-bottom mono">
           <span>25.21834°N · 55.42012°E</span>
-          <span>ALT 120m · 14:32:07Z</span>
         </div>
       </div>
 
@@ -116,8 +115,8 @@
  <div class="about-body" id="aboutBody">
  <div class="about-page active" data-page="0">
  <div class="about-eyebrow">WHAT THIS TOOL IS</div>
- <h2>Plans where to put DroneBox stations.</h2>
- <p>When an emergency call comes in, the nearest DroneBox launches automatically and arrives on scene before patrol units. This tool decides how many stations you need and where to put them.</p>
+ <h2>Plans where to deploy drone-response stations.</h2>
+ <p>When an emergency call comes in, the nearest station launches automatically and arrives on scene before patrol units. This open planning tool decides how many stations you need and where to put them — for any drone platform or dock, not a specific vendor.</p>
  <div class="about-illus">
  <svg viewBox="0 0 520 180" xmlns="http://www.w3.org/2000/svg">
  <defs>
@@ -147,9 +146,10 @@
  </svg>
  </div>
  <div class="about-numbered">
- <div class="about-step-row"><div class="about-step-num">1</div><div class="about-step-body"><strong>Draw the operational area</strong></div></div>
- <div class="about-step-row"><div class="about-step-num">2</div><div class="about-step-body"><strong>Set incident KPIs and upload or generate data</strong></div></div>
- <div class="about-step-row"><div class="about-step-num">3</div><div class="about-step-body"><strong>Compute and export the deployment plan</strong></div></div>
+ <div class="about-step-row"><div class="about-step-num">1</div><div class="about-step-body"><strong>Define the operational area</strong></div></div>
+ <div class="about-step-row"><div class="about-step-num">2</div><div class="about-step-body"><strong>Add incident data and set response KPIs</strong></div></div>
+ <div class="about-step-row"><div class="about-step-num">3</div><div class="about-step-body"><strong>Compute the deployment plan</strong></div></div>
+ <div class="about-step-row"><div class="about-step-num">4</div><div class="about-step-body"><strong>Export the report and handoff files</strong></div></div>
  </div>
  </div>
 
@@ -157,8 +157,8 @@
  <div class="about-eyebrow">THE MATH, SIMPLY</div>
  <h2>Two questions: where, and how many.</h2>
  <div class="about-cards">
- <div class="about-card-small"><div class="ac-label">WHERE</div><div class="ac-text">Greedy maximum-coverage: place each station where it covers the most incidents not already covered, respecting no-fly zones.</div></div>
- <div class="about-card-small"><div class="ac-label">HOW MANY</div><div class="ac-text">Time-aware simulation: when calls overlap, the simulation grows the drone count at each site until every category hits its target.</div></div>
+ <div class="about-card-small"><div class="ac-label">WHERE</div><div class="ac-text">Cover the most demand first, respecting no-fly and no-deploy zones. Choose how demand is modeled: smoothed hotspots with a growth projection, the exact historical incidents, or many simulated futures (Monte Carlo).</div></div>
+ <div class="about-card-small"><div class="ac-label">HOW MANY</div><div class="ac-text">A time-aware simulation grows the number of drones at each site until every incident category meets its response-time target. One dispatch overhead (launch + climb) is subtracted from each KPI.</div></div>
  </div>
  <div class="about-illus">
  <svg viewBox="0 0 520 130" xmlns="http://www.w3.org/2000/svg">
@@ -181,7 +181,7 @@
  </div>
  <div>
  <div class="about-eyebrow" style="margin-bottom: 6px;">HONEST LIMITS</div>
- <p class="muted" style="margin-top: 0;">Straight-line paths - constant mission duration - no weather downtime. Use real flight logs to calibrate before procurement.</p>
+ <p class="muted" style="margin-top: 0;">Straight-line flight paths · constant service time per call · no weather downtime. Projections are only as good as the incident data — calibrate with real flight logs before procurement.</p>
  </div>
  </div>
 
@@ -196,7 +196,7 @@
  <p style="text-align: left;">Our purpose is not only to simplify planning, but to make drone deployment more evidence-based, scalable, and operationally defensible. By helping agencies move from assumptions to data-driven deployment models, we aim to support faster response, better resource allocation, and stronger public safety outcomes.</p>
  <hr class="about-closing-divider">
  <p class="about-closing">The future of DFR should not depend on guesswork. It should be planned, measured, and built around the communities it is meant to serve.</p>
- <div class="signature">Built by the Autonomous Systems Center<br>Autonomous Systems Center - Dubai Police</div>
+ <div class="signature">Built by the Unmanned Aerial Systems Center<br>Unmanned Aerial Systems Center - Dubai Police</div>
  </div>
  </div>
  </div>

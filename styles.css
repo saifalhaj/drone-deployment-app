@@ -317,15 +317,22 @@ main { flex: 1; display: flex; min-height: 0; }
 }
 .stat-cell {
   background: var(--surface-1); padding: 8px 10px;
+  box-shadow: inset 2px 0 0 rgba(124, 220, 232, 0.18);
 }
 .stat-cell-wide { grid-column: 1 / -1; }
+/* Key driver of unit sizing — accent it so it reads at a glance */
+.stat-cell-key {
+  background: rgba(124, 220, 232, 0.07);
+  box-shadow: inset 3px 0 0 #7CDCE8;
+}
+.stat-cell-key .stat-value { color: #7CDCE8; }
 .stat-label {
   font-size: 9px; color: var(--text-muted); text-transform: uppercase;
   letter-spacing: 0.6px; font-family: 'JetBrains Mono';
 }
 .stat-value {
   font-family: 'JetBrains Mono'; font-size: 14px; font-weight: 500;
-  margin-top: 3px; color: var(--text); line-height: 1.2;
+  margin-top: 3px; color: var(--accent); line-height: 1.2;
 }
 .stat-value.mono-sm { font-size: 11px; }
 .stat-desc {
@@ -634,7 +641,8 @@ code { font-family: 'JetBrains Mono'; font-size: 10.5px; background: var(--surfa
   padding: 14px 20px;
   border-top: 1px solid var(--border);
   display: flex;
-  gap: 14px;
+  flex-wrap: wrap;
+  gap: 10px;
   align-items: center;
   justify-content: space-between;
   background: var(--surface-1);
@@ -644,13 +652,16 @@ code { font-family: 'JetBrains Mono'; font-size: 10.5px; background: var(--surfa
 }
 .actions-zone {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   min-width: 0;
 }
-.actions-files { flex: 0 1 48%; justify-content: flex-start; }
-.actions-workflow { flex: 1 1 52%; justify-content: flex-end; }
-.actions-zone .btn { flex: 0 1 auto; min-width: 86px; }
+/* The action bar lives in the narrow sidebar; give each zone its own row so
+   buttons wrap cleanly instead of overflowing and overlapping each other. */
+.actions-files { flex: 1 1 100%; justify-content: flex-start; }
+.actions-workflow { flex: 1 1 100%; justify-content: flex-end; }
+.actions-zone .btn { flex: 0 0 auto; width: auto; min-width: 80px; }
 .actions-workflow .btn-primary { min-width: 150px; }
 .btn-soft-danger {
   opacity: 0.78;
@@ -686,8 +697,8 @@ code { font-family: 'JetBrains Mono'; font-size: 10.5px; background: var(--surfa
 #app[data-step="3"] #resetBtn,
 #app[data-step="4"] #resetBtn { order: 2; }
 #app[data-step="3"] #continueStep3 { order: 3; }
-#app[data-step="4"] .actions-files { flex-basis: 58%; }
-#app[data-step="4"] .actions-workflow { flex-basis: 42%; }
+#app[data-step="4"] .actions-files { flex-basis: 100%; }
+#app[data-step="4"] .actions-workflow { flex-basis: 100%; }
 
 /* Custom leaflet draw toolbar styling */
 .leaflet-draw .leaflet-draw-toolbar a { background-color: var(--surface-2) !important; border-color: var(--border) !important; }
@@ -2120,3 +2131,21 @@ input {
 .about-attribution a { color: var(--accent-dim); text-decoration: none; }
 .about-attribution a:hover { color: var(--accent); text-decoration: underline; }
 .attribution-license { color: var(--text-dim); margin-top: 8px; }
+
+/* ============ STEP 01 SAMPLE-DATA CALLOUT ============ */
+.sample-callout {
+  display: flex; align-items: center; gap: 10px; justify-content: space-between;
+  padding: 10px 12px; margin-bottom: 14px;
+  background: rgba(124, 220, 232, 0.06);
+  border: 1px solid rgba(124, 220, 232, 0.3); border-radius: 6px;
+}
+.sample-callout-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sample-callout-text strong { font-size: 12px; color: var(--text); }
+.sample-callout-text span { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+.sample-callout .btn { flex: 0 0 auto; white-space: nowrap; }
+
+/* ============ PLANNING MODE BRIEFS ============ */
+.mode-brief {
+  border-left: 2px solid rgba(124, 220, 232, 0.4);
+  padding-left: 9px; margin: 4px 0 12px;
+}
