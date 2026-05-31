@@ -282,6 +282,28 @@
  <button class="btn btn-ghost" id="downloadWater" disabled>Save KMZ</button>
  </div>
  <div class="status-line" id="statusWater">No water exclusions</div>
+
+ <div class="subsection-label" style="margin-top: 14px;">
+ <span><span class="layer-swatch" style="background:#E8A744;"></span> Existing Deployment</span>
+ <span class="hint">compare against your current stations</span>
+ </div>
+ <div class="field" style="margin-bottom: 6px;">
+ <select id="existingDeploymentMode">
+ <option value="none" selected>None</option>
+ <option value="place">Place on map</option>
+ <option value="upload">Upload CSV</option>
+ </select>
+ <div class="field-desc">Specify stations you already operate to see what to keep, add, or remove.</div>
+ </div>
+ <div class="status-line" id="existingPlaceHint" style="display:none;">Click the map to drop an existing station. Edit its details below.</div>
+ <label class="btn btn-secondary" id="existingUploadLabel" style="display:none; text-align:center; cursor:pointer; margin-bottom:6px;">
+ Upload CSV
+ <input type="file" id="existingCsvInput" accept=".csv,text/csv" style="display:none;">
+ </label>
+ <div class="field-desc" id="existingCsvHint" style="display:none;">Columns: lat, lng, station_name, unit_count, platform_type</div>
+ <div id="existingStationsList" class="existing-stations-list"></div>
+ <div class="status-line" id="statusExisting">No existing stations</div>
+
  <div class="step-footer">
  <button class="btn btn-primary" id="continueStep1" disabled>Continue to Incident Data</button>
  </div>
@@ -662,6 +684,8 @@
  <div class="metric-value" id="m-kpi">-</div>
  </div>
  </div>
+
+ <div class="comparison-panel" id="comparisonPanel" style="display:none;"></div>
 
  <div class="marginal-chart" id="marginalChart" style="display:none;">
  <div class="chart-header">Saturation Curves</div>

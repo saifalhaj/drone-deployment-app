@@ -2526,6 +2526,32 @@
       return blocked;
     }
 
+    // Locked existing stations (Item 1) are forced into the deployment: pre-cover
+    // the incidents they reach, then let the greedy fill the remaining gaps.
+    const lockedSeeds = buildLockedSeeds();
+    for (const seed of lockedSeeds) {
+      const seedCovered = [];
+      for (let j = 0; j < n; j++) {
+        if (covered[j]) continue;
+        if (haversine(seed, standoff[j]) > incRadius[j]) continue;
+        if (hasNoFly && flightPathBlocked(seed, standoff[j])) continue;
+        seedCovered.push(j);
+      }
+      stations.push({
+        lat: seed.lat, lng: seed.lng,
+        covered: seedCovered.length,
+        incidentIdx: seedCovered.slice(),
+        radius: seed.radius || maxRadius,
+        color: EXISTING_STATION_COLOR,
+        typeName: seed.typeName || 'Existing Station',
+        typeId: seed.typeId,
+        speedKmh: seed.speedKmh,
+        serviceTimeMin: seed.serviceTimeMin,
+        locked: true, existing: true
+      });
+      for (const j of seedCovered) { if (!covered[j]) { covered[j] = true; numCovered++; } }
+    }
+
     while (numCovered < targetCount) {
       let bestIdx = -1;
       let bestSet = [];
@@ -2707,6 +2733,38 @@
         weight += Number(demandPoints[j].weight) || 0;
       }
       return { set: out, weight };
+    }
+
+    // Locked existing stations (Item 1): forced in, pre-covering the demand cells
+    // they reach (using their platform radius), then the greedy fills the rest.
+    const lockedSeeds = buildLockedSeeds();
+    for (const seed of lockedSeeds) {
+      const seedType = { speedKmh: seed.speedKmh, radius: seed.radius };
+      const seedSet = [];
+      let seedWeight = 0;
+      for (let j = 0; j < n; j++) {
+        if (covered[j]) continue;
+        const r = radiusFor(demandPoints[j], seedType);
+        if (haversine(seed, standoff[j]) > r) continue;
+        if (hasNoFly && flightPathBlocked(seed, standoff[j])) continue;
+        seedSet.push(j);
+        seedWeight += Number(demandPoints[j].weight) || 0;
+      }
+      stations.push({
+        lat: seed.lat, lng: seed.lng,
+        covered: seedSet.length,
+        incidentIdx: seedSet.slice(),
+        demandIdx: seedSet.slice(),
+        demandWeight: seedWeight,
+        radius: seed.radius || (radius || 0),
+        color: EXISTING_STATION_COLOR,
+        typeName: seed.typeName || 'Existing Station',
+        typeId: seed.typeId,
+        speedKmh: seed.speedKmh,
+        serviceTimeMin: seed.serviceTimeMin,
+        locked: true, existing: true
+      });
+      for (const j of seedSet) { if (!covered[j]) { covered[j] = true; coveredWeight += Number(demandPoints[j].weight) || 0; } }
     }
 
     while (coveredWeight < targetWeight) {
@@ -3370,6 +3428,7 @@
     }
     renderStationReportList();
     renderStationDetail(null);
+    computeComparison(incidents);
   }
 
   function aggregateMonteCarlo(runRecords, demandGrid, settings, startedAtMs) {
@@ -5247,6 +5306,7 @@
         renderStationReportList();
         renderStationDetail(null);
         cacheCurrentPlanningResult();
+        computeComparison(simulationIncidents);
 
         hideComputeOverlay();
         document.getElementById('optimizeBtn').disabled = false;
@@ -5315,6 +5375,7 @@
       document.getElementById(id).textContent = '—';
     });
     setDeploymentSnapshotVisible(false);
+    clearExistingDeployment();
     const statsBlock = document.getElementById('incidentStatsBlock');
     if (statsBlock) statsBlock.style.display = 'none';
     const chartBlock = document.getElementById('marginalChart');
@@ -5444,6 +5505,366 @@
     const stamp = buildOperationFileStamp();
     XLSX.writeFile(wb, `dfr-deployment-${stamp.opId}-${stamp.ts}.xlsx`);
   };
+
+  // ============ EXISTING DEPLOYMENT + COMPARISON (Item 1) ============
+  const EXISTING_STATION_COLOR = '#E8A744'; // amber — current/unmatched
+  const EXISTING_KEEP_COLOR = '#5BD6A4';    // green — kept (present in both)
+  const COMPARISON_MATCH_M = 1200;          // existing↔recommended "same site" threshold
+  let existingStationLayer = null;
+  let existingSeq = 0;
+
+  function ensureExistingLayer() {
+    if (!existingStationLayer) existingStationLayer = new L.LayerGroup().addTo(map);
+    return existingStationLayer;
+  }
+  function catalogPlatformById(id) {
+    return DRONE_CATALOG.find(p => p.id === id) || null;
+  }
+  function defaultPlatformId() {
+    return DRONE_CATALOG.length ? DRONE_CATALOG[0].id : '';
+  }
+  // Geographic coverage radius for an existing station, derived the same way the
+  // optimizer derives a typed station's radius: platform speed × strictest
+  // category fly-time, capped by the platform's nominal radius. No platform ⇒
+  // use the global drone-speed input (units stay authoritative either way).
+  function existingStationRadiusM(plat) {
+    const speedMs = plat ? (plat.speedKmh * 1000 / 3600) : (inputSpeedToMs(document.getElementById('droneSpeed').value) || 15);
+    let maxEff = 0;
+    for (const cat of incidentCategories) maxEff = Math.max(maxEff, effectiveFlyTimeSec(cat));
+    let r = speedMs * maxEff;
+    if (plat && plat.radius) r = Math.min(r, plat.radius);
+    if (!(r > 0)) r = (plat && plat.radius) ? plat.radius : 5000;
+    return r;
+  }
+  function existingStationFlags(s) {
+    const pt = { lat: Number(s.lat), lng: Number(s.lng) };
+    const outsideArea = !areaPolygon || !pointInPolygon(pt, areaPolygon);
+    const inNoFly = (typeof isInNoFlyZone === 'function') ? isInNoFlyZone(pt) : false;
+    return { outsideArea, inNoFly };
+  }
+  function platformOptionsHtml(selectedId) {
+    return ['<option value="">Default platform</option>']
+      .concat(DRONE_CATALOG.map(p => `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>${escapeHtml(p.name)}</option>`))
+      .join('');
+  }
+
+  function addExistingStation(latlng, opts) {
+    existingSeq++;
+    const s = {
+      id: 'ex_' + existingSeq,
+      lat: Number(latlng.lat),
+      lng: Number(latlng.lng),
+      name: (opts && opts.name) || `Existing ${String(existingSeq).padStart(2, '0')}`,
+      units: (opts && Number.isFinite(opts.units)) ? opts.units : 2,
+      platformId: (opts && opts.platformId != null) ? opts.platformId : defaultPlatformId(),
+      locked: !!(opts && opts.locked)
+    };
+    existingStations.push(s);
+    renderExistingStationsLayer();
+    renderExistingList();
+    updateExistingStatus();
+    return s;
+  }
+  function removeExistingStation(id) {
+    existingStations = existingStations.filter(s => s.id !== id);
+    renderExistingStationsLayer();
+    renderExistingList();
+    updateExistingStatus();
+  }
+  function clearExistingDeployment() {
+    existingStations = [];
+    lastComparison = null;
+    if (existingStationLayer) existingStationLayer.clearLayers();
+    renderExistingList();
+    updateExistingStatus();
+    renderComparisonPanel();
+  }
+
+  function renderExistingStationsLayer() {
+    const layer = ensureExistingLayer();
+    layer.clearLayers();
+    existingStations.forEach((s, i) => {
+      const pt = { lat: Number(s.lat), lng: Number(s.lng) };
+      if (!Number.isFinite(pt.lat) || !Number.isFinite(pt.lng)) return;
+      const flags = existingStationFlags(s);
+      const kept = s.__keep === true;
+      const color = kept ? EXISTING_KEEP_COLOR : EXISTING_STATION_COLOR;
+      const marker = L.circleMarker(pt, {
+        radius: 7, color: '#06080B', weight: 1.5,
+        fillColor: color, fillOpacity: 0.95, renderer: canvasRenderer
+      });
+      const flagTxt = [];
+      if (flags.outsideArea) flagTxt.push('⚠ outside operational area');
+      if (flags.inNoFly) flagTxt.push('⚠ in a no-fly zone — drones cannot deploy here');
+      const lockTxt = s.locked ? ' · locked' : '';
+      const keepTxt = lastComparison ? (kept ? ' · KEEP' : ' · consider removing') : '';
+      marker.bindTooltip(`${escapeHtml(s.name)} (${s.units}u${lockTxt})${keepTxt}${flagTxt.length ? ' — ' + flagTxt.join('; ') : ''}`,
+        { direction: 'top' });
+      layer.addLayer(marker);
+      if (s.locked || flags.outsideArea || flags.inNoFly) {
+        layer.addLayer(L.circleMarker(pt, {
+          radius: 11, color: flags.inNoFly ? '#FF6B7E' : color, weight: 1.5,
+          fill: false, opacity: 0.8, dashArray: '3,3', renderer: canvasRenderer
+        }));
+      }
+    });
+  }
+
+  function renderExistingList() {
+    const host = document.getElementById('existingStationsList');
+    if (!host) return;
+    if (existingStations.length === 0) { host.innerHTML = ''; return; }
+    host.innerHTML = existingStations.map(s => {
+      const flags = existingStationFlags(s);
+      const warn = [];
+      if (flags.outsideArea) warn.push('outside area');
+      if (flags.inNoFly) warn.push('in no-fly zone');
+      return `<div class="existing-row" data-id="${s.id}">
+        <input class="ex-name" type="text" value="${escapeHtml(s.name)}" aria-label="Station name">
+        <div class="existing-row-fields">
+          <input class="ex-units" type="number" min="1" max="50" value="${s.units}" aria-label="Unit count" title="Unit count">
+          <select class="ex-platform" aria-label="Platform">${platformOptionsHtml(s.platformId)}</select>
+          <label class="ex-lock-label"><input class="ex-lock" type="checkbox"${s.locked ? ' checked' : ''}> Lock</label>
+          <button class="ex-remove" type="button" aria-label="Remove">×</button>
+        </div>
+        ${warn.length ? `<div class="ex-warn">⚠ ${warn.join(' · ')}</div>` : ''}
+      </div>`;
+    }).join('');
+    host.querySelectorAll('.existing-row').forEach(row => {
+      const id = row.dataset.id;
+      const s = existingStations.find(x => x.id === id);
+      if (!s) return;
+      row.querySelector('.ex-name').oninput = function () { s.name = this.value; renderExistingStationsLayer(); };
+      row.querySelector('.ex-units').onchange = function () { s.units = Math.max(1, parseInt(this.value) || 1); this.value = s.units; renderExistingStationsLayer(); };
+      row.querySelector('.ex-platform').onchange = function () { s.platformId = this.value; renderExistingStationsLayer(); };
+      row.querySelector('.ex-lock').onchange = function () { s.locked = this.checked; renderExistingStationsLayer(); updateExistingStatus(); };
+      row.querySelector('.ex-remove').onclick = function () { removeExistingStation(id); };
+    });
+  }
+
+  function updateExistingStatus() {
+    const el = document.getElementById('statusExisting');
+    if (!el) return;
+    if (existingStations.length === 0) { el.textContent = 'No existing stations'; el.classList.remove('good'); return; }
+    const locked = existingStations.filter(s => s.locked).length;
+    el.textContent = `${existingStations.length} existing station${existingStations.length === 1 ? '' : 's'}${locked ? ` · ${locked} locked` : ''}`;
+    el.classList.add('good');
+  }
+
+  function setExistingDeploymentMode(mode) {
+    existingDeploymentMode = (mode === 'place' || mode === 'upload') ? mode : 'none';
+    const hint = document.getElementById('existingPlaceHint');
+    const uploadLabel = document.getElementById('existingUploadLabel');
+    const csvHint = document.getElementById('existingCsvHint');
+    if (hint) hint.style.display = existingDeploymentMode === 'place' ? '' : 'none';
+    if (uploadLabel) uploadLabel.style.display = existingDeploymentMode === 'upload' ? '' : 'none';
+    if (csvHint) csvHint.style.display = existingDeploymentMode === 'upload' ? '' : 'none';
+    // Placing on the map and area drawing are mutually exclusive interactions.
+    if (existingDeploymentMode === 'place' && typeof exitDrawing === 'function') exitDrawing();
+    map.getContainer().style.cursor = existingDeploymentMode === 'place' ? 'copy' : '';
+  }
+  function onExistingMapClick(e) {
+    if (existingDeploymentMode !== 'place') return;
+    if (drawMode) return; // don't steal clicks from area/zone drawing
+    addExistingStation(e.latlng);
+  }
+
+  // CSV: lat, lng, station_name, unit_count, platform_type (header row, any order).
+  function parseExistingCsv(text) {
+    const lines = text.split(/\r?\n/).filter(l => l.trim().length);
+    if (lines.length < 2) return [];
+    const splitRow = (line) => line.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+    const header = splitRow(lines[0]).map(h => h.toLowerCase());
+    const idx = (names) => { for (const nm of names) { const k = header.indexOf(nm); if (k >= 0) return k; } return -1; };
+    const latI = idx(['lat', 'latitude']);
+    const lngI = idx(['lng', 'lon', 'long', 'longitude']);
+    const nameI = idx(['station_name', 'name', 'station']);
+    const unitI = idx(['unit_count', 'units', 'unit']);
+    const platI = idx(['platform_type', 'platform', 'type']);
+    const out = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cols = splitRow(lines[i]);
+      const lat = parseFloat(cols[latI]);
+      const lng = parseFloat(cols[lngI]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      // Match platform by id, then loosely by name substring.
+      let platformId = defaultPlatformId();
+      const raw = platI >= 0 ? (cols[platI] || '').trim() : '';
+      if (raw) {
+        const byId = catalogPlatformById(raw);
+        const byName = DRONE_CATALOG.find(p => p.name.toLowerCase().includes(raw.toLowerCase()) || raw.toLowerCase().includes(p.id));
+        platformId = byId ? byId.id : (byName ? byName.id : defaultPlatformId());
+      }
+      out.push({
+        lat, lng,
+        name: (nameI >= 0 && cols[nameI]) ? cols[nameI] : '',
+        units: unitI >= 0 ? Math.max(1, parseInt(cols[unitI]) || 2) : 2,
+        platformId
+      });
+    }
+    return out;
+  }
+
+  // Locked existing stations forced into the optimizer output (read by both
+  // greedy routines). Empty unless the user locked at least one station.
+  function buildLockedSeeds() {
+    if (!existingStations || existingStations.length === 0) return [];
+    return existingStations.filter(s => s.locked).map(s => {
+      const plat = catalogPlatformById(s.platformId);
+      return {
+        lat: Number(s.lat), lng: Number(s.lng),
+        radius: existingStationRadiusM(plat),
+        units: Math.max(1, parseInt(s.units) || 2),
+        typeName: plat ? plat.name : 'Existing Station',
+        typeId: s.platformId || undefined,
+        speedKmh: plat ? plat.speedKmh : undefined,
+        serviceTimeMin: plat ? plat.serviceTimeMin : undefined
+      };
+    }).filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lng));
+  }
+
+  // Evaluate ANY layout (current or recommended) on the same geographic basis:
+  // assign each incident to the nearest covering station, then simulate the
+  // loss model per cluster with that station's authoritative unit count. Both
+  // sides of the comparison go through this identical path, so coverage / KPI /
+  // load are apples-to-apples regardless of planning mode.
+  function evaluateLayoutGeneric(rawSites, allIncidents) {
+    const kpi = getKpiParams();
+    const hasNoFly = noFlyZones.length > 0;
+    const sites = rawSites.map(s => ({
+      lat: Number(s.lat), lng: Number(s.lng),
+      radius: Number(s.radius) || 0,
+      units: Math.max(1, parseInt(s.units) || 1),
+      serviceTimeMin: (s.serviceTimeMin != null) ? s.serviceTimeMin : kpi.serviceTimeMin,
+      incidentIdx: [], covered: 0
+    })).filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lng) && s.radius > 0);
+    for (let i = 0; i < allIncidents.length; i++) {
+      const inc = allIncidents[i];
+      const target = hasNoFly ? standoffPoint(inc) : inc;
+      let best = -1, bestD = Infinity;
+      for (let k = 0; k < sites.length; k++) {
+        const st = sites[k];
+        const d = haversine(st, target);
+        if (d > (st.radius || 0)) continue;
+        if (hasNoFly && flightPathBlocked(st, target)) continue;
+        if (d < bestD) { bestD = d; best = k; }
+      }
+      if (best >= 0) sites[best].incidentIdx.push(i);
+    }
+    let coveredCount = 0;
+    for (const s of sites) {
+      const cluster = s.incidentIdx.map(idx => allIncidents[idx]).filter(Boolean);
+      s.covered = cluster.length;
+      coveredCount += cluster.length;
+      const serviceMin = (s.serviceTimeMin != null) ? s.serviceTimeMin : kpi.serviceTimeMin;
+      const sim = simulateLossModel(cluster, s.units, serviceMin / 60);
+      s.achievedServiceLevel = sim.overall;
+      s.loadMetrics = computeStationLoadMetrics(cluster, s.units, serviceMin, kpi.periodHours);
+    }
+    const total = allIncidents.length || 0;
+    const net = buildNetworkLoadSummary(sites);
+    return {
+      count: sites.length,
+      units: sites.reduce((a, s) => a + s.units, 0),
+      coveragePct: total ? 100 * coveredCount / total : 0,
+      kpiPct: overallKpiCompliance(sites, total) * 100,
+      loadPct: net.loadPct || 0,
+      sites
+    };
+  }
+  function existingLayoutSites() {
+    return existingStations.map(s => {
+      const plat = catalogPlatformById(s.platformId);
+      return {
+        lat: Number(s.lat), lng: Number(s.lng),
+        radius: existingStationRadiusM(plat),
+        units: Math.max(1, parseInt(s.units) || 2),
+        serviceTimeMin: plat ? plat.serviceTimeMin : undefined
+      };
+    });
+  }
+
+  function computeComparison(simulationIncidents) {
+    if (!existingStations || existingStations.length === 0) {
+      lastComparison = null;
+      existingStations.forEach(s => { delete s.__keep; });
+      renderComparisonPanel();
+      renderExistingStationsLayer();
+      return;
+    }
+    const current = evaluateLayoutGeneric(existingLayoutSites(), simulationIncidents);
+    const recommended = evaluateLayoutGeneric(stations, simulationIncidents);
+    const matchedRec = new Array(stations.length).fill(false);
+    let keep = 0, remove = 0;
+    for (const ex of existingStations) {
+      const exPt = { lat: Number(ex.lat), lng: Number(ex.lng) };
+      let matched = false;
+      for (let r = 0; r < stations.length; r++) {
+        if (matchedRec[r]) continue;
+        if (haversine(exPt, stations[r]) <= COMPARISON_MATCH_M) { matched = true; matchedRec[r] = true; break; }
+      }
+      ex.__keep = matched || !!ex.locked;
+      if (ex.__keep) keep++; else remove++;
+    }
+    const add = matchedRec.filter(m => !m).length;
+    lastComparison = { current, recommended, delta: { keep, add, remove } };
+    renderComparisonPanel();
+    renderExistingStationsLayer();
+  }
+
+  function renderComparisonPanel() {
+    const host = document.getElementById('comparisonPanel');
+    if (!host) return;
+    if (!lastComparison) { host.style.display = 'none'; host.innerHTML = ''; return; }
+    const c = lastComparison;
+    const row = (label, cur, rec, suffix) => `<tr><td>${label}</td><td>${cur}${suffix || ''}</td><td>${rec}${suffix || ''}</td></tr>`;
+    const f1 = v => (Math.round(Number(v) * 10) / 10).toFixed(1);
+    host.innerHTML = `
+      <div class="comparison-head"><span class="step-tag">COMPARE</span><span>Current vs Recommended</span></div>
+      <table class="comparison-table">
+        <thead><tr><th></th><th>Current</th><th>Recommended</th></tr></thead>
+        <tbody>
+          ${row('Stations', c.current.count, c.recommended.count)}
+          ${row('Units', c.current.units, c.recommended.units)}
+          ${row('Geographic coverage', f1(c.current.coveragePct), f1(c.recommended.coveragePct), '%')}
+          ${row('KPI compliance', f1(c.current.kpiPct), f1(c.recommended.kpiPct), '%')}
+          ${row('Network load', f1(c.current.loadPct), f1(c.recommended.loadPct), '%')}
+        </tbody>
+      </table>
+      <div class="comparison-delta">
+        <span class="cmp-keep">Keep: ${c.delta.keep}</span>
+        <span class="cmp-add">Add: ${c.delta.add}</span>
+        <span class="cmp-remove">Consider removing: ${c.delta.remove}</span>
+      </div>
+      <div class="comparison-legend"><span class="dot keep"></span>Keep <span class="dot add"></span>New (recommended) <span class="dot cur"></span>Current</div>`;
+    host.style.display = '';
+  }
+
+  // ---- wiring (controls live in panel 1, present at script-eval time) ----
+  const existingModeSel = document.getElementById('existingDeploymentMode');
+  if (existingModeSel) existingModeSel.onchange = function () { setExistingDeploymentMode(this.value); };
+  const existingCsvInput = document.getElementById('existingCsvInput');
+  if (existingCsvInput) existingCsvInput.onchange = function () {
+    const file = this.files && this.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = parseExistingCsv(String(reader.result || ''));
+        if (parsed.length === 0) { alert('No valid rows found. Expected columns: lat, lng, station_name, unit_count, platform_type.'); return; }
+        parsed.forEach(p => addExistingStation({ lat: p.lat, lng: p.lng }, { name: p.name, units: p.units, platformId: p.platformId }));
+        if (areaPolygon && existingStations.length) {
+          const b = L.latLngBounds(existingStations.map(s => [s.lat, s.lng]));
+          if (b.isValid()) map.fitBounds(b.pad(0.3));
+        }
+      } catch (err) {
+        alert('Failed to parse CSV: ' + (err && err.message ? err.message : err));
+      }
+    };
+    reader.readAsText(file);
+    this.value = '';
+  };
+  map.on('click', onExistingMapClick);
 
   function latLngToPlain(ll) {
     return { lat: Number(ll.lat), lng: Number(ll.lng) };
@@ -5601,6 +6022,30 @@
         network_peak_hour: networkLoad.peakHour,
         network_peak_hour_incidents: networkLoad.peakHourCount
       },
+      existing_deployment: existingStations.map(s => ({
+        lat: Number(s.lat),
+        lng: Number(s.lng),
+        station_name: s.name,
+        unit_count: s.units,
+        platform_type: s.platformId || null,
+        locked: !!s.locked
+      })),
+      recommended_deployment: stations.map((s, idx) => ({
+        id: idx + 1,
+        lat: s.lat,
+        lng: s.lng,
+        platform: s.typeName,
+        unit_count: s.units,
+        incidents_covered: s.covered,
+        radius_m: s.radius,
+        locked: !!s.locked
+      })),
+      comparison: lastComparison ? {
+        match_threshold_m: COMPARISON_MATCH_M,
+        current: { count: lastComparison.current.count, units: lastComparison.current.units, coverage_pct: lastComparison.current.coveragePct, kpi_pct: lastComparison.current.kpiPct, load_pct: lastComparison.current.loadPct },
+        recommended: { count: lastComparison.recommended.count, units: lastComparison.recommended.units, coverage_pct: lastComparison.recommended.coveragePct, kpi_pct: lastComparison.recommended.kpiPct, load_pct: lastComparison.recommended.loadPct },
+        delta: lastComparison.delta
+      } : null,
       area: areaPolygon ? {
         type: 'Polygon',
         coordinates: [(Array.isArray(areaPolygon.getLatLngs()[0]) ? areaPolygon.getLatLngs()[0] : areaPolygon.getLatLngs()).map(ll => [ll.lng, ll.lat])],
@@ -7707,6 +8152,53 @@
 
       if (isMonteCarloPdf) {
         addMonteCarloSensitivityPage(pdf, T, M, W, PAGE_H);
+      }
+
+      // ---- EXISTING vs RECOMMENDED COMPARISON PAGE (Item 1) ----
+      if (lastComparison) {
+        const c = lastComparison;
+        pdf.addPage();
+        fill(T.bg); pdf.rect(0, 0, 210, PAGE_H, 'F');
+        text(T.text); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(13);
+        pdf.text('Existing vs Recommended Deployment', M, 16);
+        pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); text(T.muted);
+        pdf.text('Your current stations measured against the optimizer recommendation on the same incident set.', M, 21);
+        let yy = 30;
+        const rowsCmp = [
+          ['Metric', 'Current Layout', 'Recommended Layout'],
+          ['Stations', String(c.current.count), String(c.recommended.count)],
+          ['Units', String(c.current.units), String(c.recommended.units)],
+          ['Geographic coverage', c.current.coveragePct.toFixed(1) + '%', c.recommended.coveragePct.toFixed(1) + '%'],
+          ['KPI compliance', c.current.kpiPct.toFixed(1) + '%', c.recommended.kpiPct.toFixed(1) + '%'],
+          ['Network load', c.current.loadPct.toFixed(1) + '%', c.recommended.loadPct.toFixed(1) + '%']
+        ];
+        const colW = [W * 0.5, W * 0.25, W * 0.25];
+        rowsCmp.forEach((r, ri) => {
+          if (ri === 0) { fill(T.surface1); stroke(T.border); pdf.rect(M, yy, W, 7, 'FD'); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8); text(T.muted); }
+          else { pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8.5); text(T.text); }
+          let cx = M + 2;
+          r.forEach((cell, ci) => { pdf.text(String(cell), cx, yy + 5); cx += colW[ci]; });
+          yy += 7;
+          stroke(T.border); pdf.line(M, yy, M + W, yy);
+        });
+        yy += 10;
+        pdf.setFont('helvetica', 'bold'); pdf.setFontSize(10); text(T.text);
+        pdf.text('Delta analysis', M, yy); yy += 7;
+        pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9);
+        [['Keep', c.delta.keep, [91, 214, 164]], ['Add', c.delta.add, [124, 220, 232]], ['Consider removing', c.delta.remove, [232, 167, 68]]].forEach(function (d) {
+          pdf.setFillColor(d[2][0], d[2][1], d[2][2]); pdf.circle(M + 1.5, yy - 1.4, 1.5, 'F');
+          text(T.text); pdf.text(`${d[0]}: ${d[1]} station${d[1] === 1 ? '' : 's'}`, M + 5, yy); yy += 6;
+        });
+        yy += 6;
+        pdf.setFontSize(7.5); text(T.muted);
+        pdf.text('Map (page 1) legend: amber = current stations · green = kept (in both layouts) · cyan = recommended (new).', M, yy);
+        const flagged = existingStations.filter(function (s) { const f = existingStationFlags(s); return f.outsideArea || f.inNoFly; });
+        if (flagged.length) {
+          yy += 6; text(T.amber);
+          pdf.text(`Note: ${flagged.length} existing station(s) flagged — outside the operational area or inside a no-fly zone.`, M, yy);
+        }
+        pdf.setFont('helvetica', 'italic'); pdf.setFontSize(6.5); text(T.muted);
+        pdf.text('UASC · Confidential · Deployment Comparison', M, 292);
       }
 
       pdf.save(`UASC_DFR_Plan_${new Date().toISOString().slice(0,10)}.pdf`);
