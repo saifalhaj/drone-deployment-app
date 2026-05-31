@@ -153,6 +153,59 @@
     if (I18N.en && Object.prototype.hasOwnProperty.call(I18N.en, key)) return I18N.en[key];
     return fallback != null ? fallback : key;
   }
+  // Merge the inlined Arabic key table (src/i18n-ar.js) into the t() registry.
+  if (typeof window !== 'undefined' && window.DFR_I18N_AR && window.DFR_I18N_AR.keys) {
+    I18N.ar = window.DFR_I18N_AR.keys;
+  }
+
+  // ---- Level-1 DOM translator (Item 4) ----
+  // Walks leaf text nodes and known attributes, substituting Arabic for the
+  // exact English source string. The original English is stashed on the element
+  // so switching back to English restores it. Layout stays LTR per Level 1;
+  // Arabic text renders RTL within each element via the Unicode bidi algorithm.
+  const I18N_SKIP_TAGS = /^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA|CODE|PRE)$/;
+  function i18nTextDict() {
+    return (typeof window !== 'undefined' && window.DFR_I18N_AR && window.DFR_I18N_AR.text) || {};
+  }
+  function translateDomTree(root, dict) {
+    if (!root) return;
+    const els = root.querySelectorAll('*');
+    for (const node of els) {
+      if (I18N_SKIP_TAGS.test(node.tagName)) continue;
+      if (node.children.length === 0) {
+        const original = node.dataset.i18nEn != null ? node.dataset.i18nEn : node.textContent;
+        const key = (original || '').trim();
+        if (key && dict[key]) {
+          if (node.dataset.i18nEn == null) node.dataset.i18nEn = node.textContent;
+          node.textContent = dict[key];
+        }
+      }
+    }
+    root.querySelectorAll('input[placeholder], textarea[placeholder]').forEach(node => {
+      const original = node.dataset.i18nPh != null ? node.dataset.i18nPh : node.getAttribute('placeholder');
+      const key = (original || '').trim();
+      if (key && dict[key]) {
+        if (node.dataset.i18nPh == null) node.dataset.i18nPh = node.getAttribute('placeholder');
+        node.setAttribute('placeholder', dict[key]);
+      }
+    });
+  }
+  function restoreEnglishTree(root) {
+    if (!root) return;
+    root.querySelectorAll('[data-i18n-en]').forEach(node => { node.textContent = node.dataset.i18nEn; });
+    root.querySelectorAll('[data-i18n-ph]').forEach(node => { node.setAttribute('placeholder', node.dataset.i18nPh); });
+  }
+  function applyLanguage(lang) {
+    currentLang = (lang === 'ar') ? 'ar' : 'en';
+    const root = document.body;
+    if (currentLang === 'ar') translateDomTree(root, i18nTextDict());
+    else restoreEnglishTree(root);
+    document.documentElement.setAttribute('lang', currentLang);
+    document.documentElement.setAttribute('dir', 'ltr'); // Level 1: no RTL layout flip
+    const sel = document.getElementById('langSelect');
+    if (sel && sel.value !== currentLang) sel.value = currentLang;
+    saveStoredSettings();
+  }
 
   // ============ USER SETTINGS (units / date format) PERSISTENCE ============
   const SETTINGS_STORAGE_KEY = 'uascDfrSettings';
@@ -170,7 +223,7 @@
     try {
       if (!window.localStorage) return;
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({
-        unitSystem, dateFormat, coordFormat
+        unitSystem, dateFormat, coordFormat, lang: currentLang
       }));
     } catch (e) { /* storage unavailable (private mode, quota) — non-fatal */ }
   }
@@ -180,6 +233,7 @@
     if (s.unitSystem === 'imperial' || s.unitSystem === 'metric') unitSystem = s.unitSystem;
     if (DATE_FORMATS.indexOf(s.dateFormat) >= 0) dateFormat = s.dateFormat;
     if (['decimal', 'dms', 'utm'].indexOf(s.coordFormat) >= 0) coordFormat = s.coordFormat;
+    if (s.lang === 'ar' || s.lang === 'en') currentLang = s.lang;
     return true;
   }
 
@@ -4860,6 +4914,9 @@
     syncSettingsControls();
   };
 
+  const langSelectEl = document.getElementById('langSelect');
+  if (langSelectEl) langSelectEl.onchange = function() { applyLanguage(this.value); };
+
   // Header Settings gear: toggle the dropdown panel; close on outside click / Esc.
   const settingsToggleBtn = document.getElementById('settingsToggle');
   const settingsPanelEl = document.getElementById('settingsPanel');
@@ -9125,6 +9182,7 @@
     setInputValue('unitSystem', unitSystem);
     setInputValue('dateFormatSelect', dateFormat);
     setInputValue('coordFormat', coordFormat);
+    setInputValue('langSelect', currentLang);
     setInputValue('onboardUnits', unitSystem);
     setInputValue('onboardDateFormat', dateFormat);
   }
@@ -9143,6 +9201,7 @@
     updateLocalizationLabels();
     refreshLocalizedOutputs();
     window.__dfrOnboardingNeeded = !hadStored;
+    if (currentLang === 'ar') applyLanguage('ar');
     return hadStored;
   }
 

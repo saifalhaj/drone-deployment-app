@@ -213,10 +213,32 @@
     });
   }
 
+  // Apply the language chosen in the planner's Settings (persisted in localStorage)
+  // so the landing page reflects it too. Level 1: LTR layout, Arabic text RTL
+  // within elements. English source strings are matched against the inlined
+  // Arabic dictionary (src/i18n-ar.js); misses stay English.
+  function applyStoredLanguage() {
+    try {
+      const raw = localStorage.getItem('uascDfrSettings');
+      const lang = raw ? JSON.parse(raw).lang : 'en';
+      if (lang !== 'ar' || !window.DFR_I18N_AR || !window.DFR_I18N_AR.text) return;
+      const dict = window.DFR_I18N_AR.text;
+      const skip = /^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA|CODE|PRE)$/;
+      document.querySelectorAll('*').forEach(node => {
+        if (skip.test(node.tagName) || node.children.length !== 0) return;
+        const key = (node.textContent || '').trim();
+        if (key && dict[key]) node.textContent = dict[key];
+      });
+      document.documentElement.setAttribute('lang', 'ar');
+      document.documentElement.setAttribute('dir', 'ltr');
+    } catch (e) { /* storage unavailable — stay English */ }
+  }
+
   updateUtcClock();
   setInterval(updateUtcClock, 1000);
   document.querySelectorAll('.drop-slot').forEach(wireDropSlot);
   wireAboutModal();
   wireSavedPlanLoader();
   wireTermsModal();
+  applyStoredLanguage();
 })();
