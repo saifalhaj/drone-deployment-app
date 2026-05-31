@@ -319,7 +319,7 @@
  <label class="field-label">Count</label>
  <input type="number" id="incidentCount" value="120" min="5" max="2000">
  </div>
- <p class="help" style="margin-top: 8px; font-size: 11px;">Probability of each category is driven by the <strong>Weight</strong> field in the Incident KPIs section above. Defaults to Hotspot Clusters distribution.</p>
+ <p class="help" style="margin-top: 8px; font-size: 11px;">Probability of each category is driven by the <strong>Priority Weight</strong> field in the Incident KPIs section above. Defaults to Mixed Urban Demand distribution.</p>
  <details class="advanced-settings" id="generateAdvanced">
  <summary>Advanced</summary>
  <div class="field" style="margin-top: 10px;">
@@ -688,6 +688,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="../src/about-modal.js"></script>
 <script src="../app.js"></script>
 
 <!-- ============ INCIDENT UPLOAD PREVIEW MODAL ============ -->
@@ -720,168 +721,6 @@
 </div>
 
 <!-- ============ ABOUT / EXPLAINER MODAL ============ -->
-<div id="aboutModal" class="about-modal" style="display:none;">
- <div class="about-backdrop"></div>
- <div class="about-card">
- <div class="about-header">
- <div class="about-header-left">
- <span class="step-dot" id="aboutStepLabel">ABOUT</span>
- <span id="aboutTitleText">DFR Deployment Planner</span>
- </div>
- <button class="about-close" id="aboutClose" aria-label="Close">x</button>
- </div>
-
- <div class="about-body" id="aboutBody">
-
- <!-- Page 1: What it does + how you use it -->
- <div class="about-page active" data-page="0">
- <div class="about-eyebrow">WHAT THIS TOOL IS</div>
- <h2>Plans where to deploy drone-response stations.</h2>
- <p>When an emergency call comes in, the nearest station launches automatically and arrives on scene before patrol units. This open planning tool decides how many stations you need and where to put them — for any drone platform or dock, not a specific vendor.</p>
- <div class="about-illus">
- <svg viewBox="0 0 520 180" xmlns="http://www.w3.org/2000/svg">
- <defs>
- <radialGradient id="cov1" cx="50%" cy="50%" r="50%">
- <stop offset="0%" stop-color="#9fb4c8" stop-opacity="0.35"/>
- <stop offset="100%" stop-color="#9fb4c8" stop-opacity="0"/>
- </radialGradient>
- </defs>
- <rect width="520" height="180" fill="#020609"/>
- <rect x="20" y="20" width="480" height="140" fill="none" stroke="#7CDCE8" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.7"/>
- <!-- coverage circles -->
- <circle cx="130" cy="80" r="55" fill="url(#cov1)"/>
- <circle cx="270" cy="100" r="55" fill="url(#cov1)"/>
- <circle cx="400" cy="70" r="55" fill="url(#cov1)"/>
- <!-- station markers -->
- <circle cx="130" cy="80" r="6" fill="#7CDCE8" stroke="#06080B" stroke-width="1.5"/>
- <circle cx="270" cy="100" r="6" fill="#7CDCE8" stroke="#06080B" stroke-width="1.5"/>
- <circle cx="400" cy="70" r="6" fill="#7CDCE8" stroke="#06080B" stroke-width="1.5"/>
- <!-- incident dots -->
- <circle cx="110" cy="60" r="3" fill="#FF6B7E"/>
- <circle cx="150" cy="100" r="3" fill="#FF6B7E"/>
- <circle cx="260" cy="80" r="3" fill="#FF6B7E"/>
- <circle cx="290" cy="120" r="3" fill="#FF6B7E"/>
- <circle cx="385" cy="55" r="3" fill="#FF6B7E"/>
- <circle cx="420" cy="90" r="3" fill="#FF6B7E"/>
- <!-- labels -->
- <text x="130" y="155" text-anchor="middle" fill="#8ea4b7" font-family="JetBrains Mono" font-size="9">SITE 1</text>
- <text x="270" y="155" text-anchor="middle" fill="#8ea4b7" font-family="JetBrains Mono" font-size="9">SITE 2</text>
- <text x="400" y="155" text-anchor="middle" fill="#8ea4b7" font-family="JetBrains Mono" font-size="9">SITE 3</text>
- <text x="260" y="14" text-anchor="middle" fill="#EAF1F8" font-family="JetBrains Mono" font-size="9" letter-spacing="1">OPERATIONAL AREA</text>
- </svg>
- </div>
- <div class="about-numbered">
- <div class="about-step-row">
- <div class="about-step-num">1</div>
- <div class="about-step-body"><strong>Define the operational area</strong></div>
- </div>
- <div class="about-step-row">
- <div class="about-step-num">2</div>
- <div class="about-step-body"><strong>Add incident data and set response KPIs</strong></div>
- </div>
- <div class="about-step-row">
- <div class="about-step-num">3</div>
- <div class="about-step-body"><strong>Compute the deployment plan</strong></div>
- </div>
- <div class="about-step-row">
- <div class="about-step-num">4</div>
- <div class="about-step-body"><strong>Export the report and handoff files</strong></div>
- </div>
- </div>
- </div>
-
- <!-- Page 2: How the math works + what it assumes -->
- <div class="about-page" data-page="1">
- <div class="about-eyebrow">THE MATH, SIMPLY</div>
- <h2>Two questions: where, and how many.</h2>
- <div class="about-cards">
- <div class="about-card-small">
- <div class="ac-label">WHERE</div>
- <div class="ac-text">Cover the most demand first, respecting no-fly and no-deploy zones. Choose how demand is modeled: smoothed hotspots with a growth projection, the exact historical incidents, or many simulated futures (Monte Carlo).</div>
- </div>
- <div class="about-card-small">
- <div class="ac-label">HOW MANY</div>
- <div class="ac-text">A time-aware simulation grows the number of drones at each site until every incident category meets its response-time target. One dispatch overhead (launch + climb) is subtracted from each KPI.</div>
- </div>
- </div>
- <div class="about-illus">
- <svg viewBox="0 0 520 130" xmlns="http://www.w3.org/2000/svg">
- <rect width="520" height="130" fill="#020609"/>
- <!-- timeline -->
- <line x1="30" y1="65" x2="490" y2="65" stroke="#54697a" stroke-width="1"/>
- <text x="30" y="22" fill="#9fb4c8" font-family="JetBrains Mono" font-size="9">DRONE 1</text>
- <text x="30" y="115" fill="#EAF1F8" font-family="JetBrains Mono" font-size="9">DRONE 2</text>
- <!-- drone 1 busy bars -->
- <rect x="60" y="32" width="80" height="14" fill="#9fb4c8" opacity="0.5"/>
- <rect x="180" y="32" width="60" height="14" fill="#9fb4c8" opacity="0.5"/>
- <rect x="300" y="32" width="90" height="14" fill="#9fb4c8" opacity="0.5"/>
- <!-- drone 2 busy bars -->
- <rect x="100" y="82" width="60" height="14" fill="#7CDCE8" opacity="0.5"/>
- <rect x="260" y="82" width="80" height="14" fill="#7CDCE8" opacity="0.5"/>
- <!-- incident dispatched markers -->
- <circle cx="60" cy="65" r="4" fill="#FF6B7E"/>
- <circle cx="100" cy="65" r="4" fill="#FF6B7E"/>
- <circle cx="180" cy="65" r="4" fill="#FF6B7E"/>
- <circle cx="260" cy="65" r="4" fill="#FF6B7E"/>
- <circle cx="300" cy="65" r="4" fill="#FF6B7E"/>
- <text x="260" y="65" fill="#020609" font-family="JetBrains Mono" font-size="8" font-weight="700" dy="2.5" text-anchor="middle">!</text>
- </svg>
- </div>
- <div>
- <div class="about-eyebrow" style="margin-bottom: 6px;">HONEST LIMITS</div>
- <p class="muted" style="margin-top: 0;">Straight-line flight paths · constant service time per call · no weather downtime. Projections are only as good as the incident data — calibrate with real flight logs before procurement.</p>
- </div>
- </div>
-
- <!-- Page 3: About us / mission -->
- <div class="about-page" data-page="2">
- <div class="about-mission">
- <img id="aboutPageLogo" alt="UASC" class="about-logo">
- <div class="about-eyebrow" style="margin-bottom: 8px;">ABOUT US</div>
- <h2>Because this work shouldn't start from scratch.</h2>
- <p style="text-align: left; margin-top: 18px;">Dubai Police's Unmanned Aerial Systems Center developed this application from years of operational experience in building and deploying one of the region's leading Drone as First Responder capabilities.</p>
- <p style="text-align: left;">Since 2020, our drone operations have supported more than 10,000 incidents, giving us practical insight into one of the most important questions facing any agency planning a DFR program: where should drones be placed, how many are needed, and what operational performance can realistically be achieved?</p>
- <p style="text-align: left;">This tool was created to transform that experience into a practical planning capability. It allows public safety agencies, civil defense organizations, search and rescue teams, emergency medical services, ports, and critical infrastructure operators to assess deployment needs using real incident data, defined coverage areas, and measurable response objectives.</p>
- <p style="text-align: left;">Our purpose is not only to simplify planning, but to make drone deployment more evidence-based, scalable, and operationally defensible. By helping agencies move from assumptions to data-driven deployment models, we aim to support faster response, better resource allocation, and stronger public safety outcomes.</p>
- <hr class="about-closing-divider">
- <p class="about-closing">The future of DFR should not depend on guesswork. It should be planned, measured, and built around the communities it is meant to serve.</p>
- <div class="signature">
- Built by the Unmanned Aerial Systems Center<br>
- Unmanned Aerial Systems Center - Dubai Police
- </div>
-
- <div class="about-attribution">
- <div class="about-eyebrow" style="margin-bottom: 6px;">BUILT WITH</div>
- <p class="muted attribution-libs">
- <a href="https://leafletjs.com/" target="_blank" rel="noopener noreferrer">Leaflet</a> ·
- <a href="https://github.com/parallax/jsPDF" target="_blank" rel="noopener noreferrer">jsPDF</a> ·
- <a href="https://html2canvas.hertzen.com/" target="_blank" rel="noopener noreferrer">html2canvas</a> ·
- <a href="https://sheetjs.com/" target="_blank" rel="noopener noreferrer">SheetJS</a> ·
- <a href="https://stuk.github.io/jszip/" target="_blank" rel="noopener noreferrer">JSZip</a>
- </p>
- <p class="muted attribution-tiles">Map tiles © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors, © <a href="https://carto.com/attributions" target="_blank" rel="noopener noreferrer">CARTO</a>.</p>
- <p class="muted attribution-license">© UASC, Dubai Police, 2026. All rights reserved.</p>
- </div>
- </div>
- </div>
-
- </div>
-
- <div class="about-footer">
- <div class="about-progress" id="aboutProgress">
- <span class="about-dot active" data-page="0"></span>
- <span class="about-dot" data-page="1"></span>
- <span class="about-dot" data-page="2"></span>
- </div>
- <span class="about-page-counter" id="aboutPageCounter">1 / 3</span>
- <div class="about-nav">
- <button id="aboutPrev" disabled><- Back</button>
- <button class="primary" id="aboutNext">Next -></button>
- </div>
- </div>
- </div>
-</div>
-
 <!-- ============ SAMPLE DATA BANNER ============ -->
 <div id="sampleDataBanner" class="sample-banner" style="display:none;">
  <span class="sample-banner-dot"></span>

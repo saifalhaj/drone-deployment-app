@@ -1943,7 +1943,7 @@
             <input type="number" data-field="serviceLevel" value="${Math.round(c.serviceLevel * 100)}" min="50" max="100" step="1">
           </div>
           <div class="field">
-            <label class="field-label" title="Relative frequency — drives this category's share of generated incidents and its siting priority">Occurrence</label>
+            <label class="field-label" title="Relative priority for this category in the algorithm. Higher values mean the optimizer prioritizes covering these incidents first.">Priority Weight</label>
             <input type="number" data-field="weight" value="${c.weight}" min="0" step="0.5">
           </div>
         </div>

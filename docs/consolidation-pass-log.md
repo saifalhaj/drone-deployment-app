@@ -123,3 +123,73 @@ engineering refactor is required. New and touched user-facing strings use
 - About modal shows the library attributions and the license note.
 - `node --check` passes for `app.js` and `src/planning/planning-mode-state.js`;
   no console errors during any flow.
+
+## 2026-05-31 — Cleanup follow-ups
+
+Three follow-up cleanups before public release.
+
+### 1. "Occurrence" → "Priority Weight"
+The per-category weight field (data key `category.weight`, unchanged) was
+relabeled from "Occurrence" — which read like observed frequency — to
+**"Priority Weight"** to convey that it configures algorithmic priority.
+- `app.js` `renderCategoriesList()`: label + tooltip ("Relative priority for
+  this category in the algorithm. Higher values mean the optimizer prioritizes
+  covering these incidents first.").
+- `planner/index.html`: the Generate help text now says "the **Priority Weight**
+  field" (and corrected a stale "Hotspot Clusters" → "Mixed Urban Demand"
+  default mention). No data-model change.
+
+### 2. About modal de-duplicated (single source of truth)
+The modal was duplicated in `index.html` and `planner/index.html`. Extracted to
+**`src/about-modal.js`** (Option B — JS-injected), which both pages load and
+which injects `#aboutModal` into the DOM on execution. This works in dev (raw
+files) and in the bundle. `build.js` now inlines `about-modal.js` into both
+dist outputs. Each page sets the page-3 logo (paths differ): the planner uses
+its embedded base64 logo; `home.js` sets `assets/uasc-logo.png`. About content
+now lives in exactly one place; verified both pages render identical content
+(heading, 4 steps, attribution) and `dist/index.html` + `dist/planner/index.html`
+build cleanly with the modal inlined.
+
+### 3. Dead CSS cleanup
+Audit finding correction: the suspected "second .actions-bar block referencing
+undefined `--bg-1`/`--cyan`" was a **false alarm** — those variables ARE defined
+(second `:root` block, ~lines 994–1025), and the only other `.actions-bar` rules
+are functional step-visibility (`display`) rules. The live action-bar styling is
+the single block (with the recent flex-wrap overlap fix). No undefined-variable
+references exist; nothing removed there.
+
+Removed genuinely-unused class rules (verified 0 references across `app.js`,
+`home.js`, `planner/index.html`, `index.html`, and `src/about-modal.js`):
+- `.stat-cell-wide` (orphaned when the wide stats cell was dropped)
+- `.cat-mix-display` (orphaned when the per-card mix footer was removed)
+- Legacy KPI block: `.kpi-panel` (+`::before`), `.kpi-header` (+`.priority`,
+  `.title`), `.kpi-sub`, `.kpi-row` (+`.field`), `.kpi-derived` (+`-line`,
+  `-value`, `.kpi-target`, `strong`)
+- `.panel.primary` (+`.panel-header`), `.step-tag.primary-tag`
+- `.help-inline`, `.chart-desc`
+- `.about-btn` (both theme copies, incl. `:hover`) — header uses
+  `.header-icon-btn` now
+- `.about-callout` (+`strong`), `.about-warn`
+- `.category-card` (removed from a grouped selector; `.marginal-chart` kept)
+- Legacy compute UI: `.compute-results`, `.compute-kpi-grid`, `.compute-kpi`
+  (+`span`/`strong`/`.accent`/`.ok`/`i`), `.compute-category-grid`,
+  `.compute-category` (+`.critical`/`.amber`/`span`/`strong`)
+- Legacy top-sites UI: `.top-sites`, `.top-sites-list`, `.top-site-row`,
+  `.top-site-rank`, `.top-site-main` (+`strong`/`span`), `.top-site-meta`
+  (+`strong`/`span`)
+
+Conservatively KEPT (flagged by the automated scan but actually in use — the
+scan ran before/around the About de-dup and did not see `src/about-modal.js`):
+`.about-attribution` / `.attribution-libs` / `.attribution-tiles` /
+`.attribution-license` (shared modal), `.advanced-targets-slot` and
+`.auto-detected-line` (Step 02/03 markup), plus all state/modifier and
+`leaflet-*` classes. CSS brace balance verified (463/463).
+
+### Verification
+- All three planning modes compute and render (Smoothed, Direct Fit; Monte Carlo
+  runs to completion with its progress panel — 30 runs is inherently slow but not
+  changed here).
+- "Priority Weight" appears everywhere "Occurrence" did; no "Occurrence" left.
+- About modal renders identically on landing and planner from the single source.
+- `node --check` clean for `app.js`, `home.js`, `src/about-modal.js`; `node
+  build.js` produces both dist outputs; no console errors; shadowing scan clean.

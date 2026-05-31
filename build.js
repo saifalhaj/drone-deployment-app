@@ -50,11 +50,13 @@ fs.mkdirSync(DIST, { recursive: true });
 
 let home = read('index.html');
 home = inlineCss(home, 'home.css', 'home.css');
+home = inlineJs(home, 'src/about-modal.js', 'src/about-modal.js');
 home = inlineJs(home, 'home.js', 'home.js');
 write('index.html', home);
 
 let planner = read('planner/index.html');
 planner = inlineCss(planner, '../styles.css', 'styles.css');
+planner = inlineJs(planner, '../src/about-modal.js', 'src/about-modal.js');
 planner = inlineJs(planner, '../app.js', 'app.js');
 write('planner/index.html', planner);
 
