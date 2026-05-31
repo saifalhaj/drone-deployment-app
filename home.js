@@ -224,10 +224,22 @@
       if (lang !== 'ar' || !window.DFR_I18N_AR || !window.DFR_I18N_AR.text) return;
       const dict = window.DFR_I18N_AR.text;
       const skip = /^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA|CODE|PRE)$/;
-      document.querySelectorAll('*').forEach(node => {
-        if (skip.test(node.tagName) || node.children.length !== 0) return;
-        const key = (node.textContent || '').trim();
-        if (key && dict[key]) node.textContent = dict[key];
+      // Walk text nodes so mixed text+element content translates too.
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+      const nodes = [];
+      let n;
+      while ((n = walker.nextNode())) {
+        const parent = n.parentNode;
+        if (parent && !skip.test(parent.nodeName)) nodes.push(n);
+      }
+      nodes.forEach(node => {
+        const raw = node.nodeValue;
+        const key = (raw || '').trim();
+        if (key && dict[key]) node.nodeValue = raw.replace(key, dict[key]);
+      });
+      document.querySelectorAll('[title]').forEach(el => {
+        const k = (el.getAttribute('title') || '').trim();
+        if (k && dict[k]) el.setAttribute('title', dict[k]);
       });
       document.documentElement.setAttribute('lang', 'ar');
       document.documentElement.setAttribute('dir', 'ltr');

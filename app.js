@@ -167,33 +167,48 @@
   function i18nTextDict() {
     return (typeof window !== 'undefined' && window.DFR_I18N_AR && window.DFR_I18N_AR.text) || {};
   }
-  function translateDomTree(root, dict) {
-    if (!root) return;
-    const els = root.querySelectorAll('*');
-    for (const node of els) {
-      if (I18N_SKIP_TAGS.test(node.tagName)) continue;
-      if (node.children.length === 0) {
-        const original = node.dataset.i18nEn != null ? node.dataset.i18nEn : node.textContent;
-        const key = (original || '').trim();
-        if (key && dict[key]) {
-          if (node.dataset.i18nEn == null) node.dataset.i18nEn = node.textContent;
-          node.textContent = dict[key];
-        }
-      }
-    }
-    root.querySelectorAll('input[placeholder], textarea[placeholder]').forEach(node => {
-      const original = node.dataset.i18nPh != null ? node.dataset.i18nPh : node.getAttribute('placeholder');
+  // Records of translated text nodes so English can be restored on switch-back.
+  let i18nTextRecords = [];
+  function translateAttr(root, dict, attr, dsKey) {
+    root.querySelectorAll('[' + attr + ']').forEach(node => {
+      const original = node.dataset[dsKey] != null ? node.dataset[dsKey] : node.getAttribute(attr);
       const key = (original || '').trim();
       if (key && dict[key]) {
-        if (node.dataset.i18nPh == null) node.dataset.i18nPh = node.getAttribute('placeholder');
-        node.setAttribute('placeholder', dict[key]);
+        if (node.dataset[dsKey] == null) node.dataset[dsKey] = node.getAttribute(attr);
+        node.setAttribute(attr, dict[key]);
       }
     });
   }
-  function restoreEnglishTree(root) {
+  function translateDomTree(root, dict) {
     if (!root) return;
-    root.querySelectorAll('[data-i18n-en]').forEach(node => { node.textContent = node.dataset.i18nEn; });
+    // Walk TEXT nodes (not just leaf elements) so mixed text+element content
+    // translates too — e.g. the step-rail rows and "<span></span>SYSTEM READY".
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    const nodes = [];
+    let n;
+    while ((n = walker.nextNode())) {
+      const parent = n.parentNode;
+      if (parent && !I18N_SKIP_TAGS.test(parent.nodeName)) nodes.push(n);
+    }
+    for (const node of nodes) {
+      const raw = node.nodeValue;
+      const key = (raw || '').trim();
+      if (key && dict[key]) {
+        i18nTextRecords.push({ node, en: raw });
+        node.nodeValue = raw.replace(key, dict[key]); // preserve surrounding whitespace
+      }
+    }
+    translateAttr(root, dict, 'placeholder', 'i18nPh');
+    translateAttr(root, dict, 'title', 'i18nTitle');
+    translateAttr(root, dict, 'aria-label', 'i18nAl');
+  }
+  function restoreEnglishTree(root) {
+    for (const r of i18nTextRecords) { try { r.node.nodeValue = r.en; } catch (e) { /* node detached */ } }
+    i18nTextRecords = [];
+    if (!root) return;
     root.querySelectorAll('[data-i18n-ph]').forEach(node => { node.setAttribute('placeholder', node.dataset.i18nPh); });
+    root.querySelectorAll('[data-i18n-title]').forEach(node => { node.setAttribute('title', node.dataset.i18nTitle); });
+    root.querySelectorAll('[data-i18n-al]').forEach(node => { node.setAttribute('aria-label', node.dataset.i18nAl); });
   }
   function applyLanguage(lang) {
     currentLang = (lang === 'ar') ? 'ar' : 'en';
