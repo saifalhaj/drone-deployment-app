@@ -57,6 +57,7 @@ write('index.html', home);
 let planner = read('planner/index.html');
 planner = inlineCss(planner, '../styles.css', 'styles.css');
 planner = inlineJs(planner, '../src/about-modal.js', 'src/about-modal.js');
+planner = inlineJs(planner, '../src/spatial-index.js', 'src/spatial-index.js');
 planner = inlineJs(planner, '../app.js', 'app.js');
 write('planner/index.html', planner);
 

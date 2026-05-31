@@ -1079,6 +1079,22 @@
     let maxWeight = 0;
     let totalRawWeight = 0;
 
+    // Spatial index over incidents in the SAME planar meter-space metric used by
+    // demandDistanceMeters (x = lng·scale.lng, y = lat·scale.lat). A cell only
+    // contributes incidents within 3×bandwidth, so an exact radius query returns
+    // precisely the set the former brute-force loop kept — identical output, but
+    // O(cells × local-density) instead of O(cells × all-incidents). Falls back to
+    // a full scan if the index module is unavailable.
+    const cutoff = bandwidthM * 3;
+    const useIndex = typeof DFRSpatialIndex !== 'undefined' && DFRSpatialIndex.SpatialGrid;
+    let demandIndex = null;
+    if (useIndex) {
+      demandIndex = new DFRSpatialIndex.SpatialGrid(Math.max(1, cutoff));
+      for (const inc of sourceIncidents) {
+        demandIndex.insert(inc.lng * scale.lng, inc.lat * scale.lat, inc);
+      }
+    }
+
     for (let row = 0; row < resolution; row++) {
       const lat = bounds.minLat + (row + 0.5) * latStep;
       for (let col = 0; col < resolution; col++) {
@@ -1087,7 +1103,10 @@
         if (!isValidLocation(cellPoint)) continue;
         const categoryWeights = {};
         let cellWeight = 0;
-        for (const inc of sourceIncidents) {
+        const nearby = demandIndex
+          ? demandIndex.queryRadius(lng * scale.lng, lat * scale.lat, cutoff)
+          : sourceIncidents;
+        for (const inc of nearby) {
           const d = demandDistanceMeters(cellPoint, inc, scale);
           if (d > bandwidthM * 3) continue;
           const cat = getCategoryById(inc.priority);
@@ -2638,9 +2657,47 @@
       return type ? Math.min(Number(type.radius) || categoryRadius, categoryRadius) : categoryRadius;
     }
 
+    // Spatial index over demand cells, used as a BROAD PHASE to prune cells far
+    // outside any candidate's coverage radius. Only enabled when there are no
+    // no-fly zones — then standoff[j] === demandPoints[j], so a projected-space
+    // superset query is provably safe. The exact haversine check below is kept
+    // as the narrow phase, so the station set is byte-for-byte unchanged. With
+    // no-fly zones present (standoff displaces the target) we fall back to the
+    // full scan to preserve exactness.
+    let demandIndex = null;
+    let maxQueryRadiusProj = 0;
+    let gScale = null;
+    if (!hasNoFly && typeof DFRSpatialIndex !== 'undefined' && DFRSpatialIndex.SpatialGrid && n > 0) {
+      let maxEffSec = 0;
+      for (const cat of incidentCategories) maxEffSec = Math.max(maxEffSec, effectiveFlyTimeSec(cat));
+      let maxSpeed = speedMs;
+      if (canUseInventory) for (const tinv of inventory) maxSpeed = Math.max(maxSpeed, (Number(tinv.speedKmh) || 60) / 3.6);
+      const maxRadiusM = maxSpeed * maxEffSec;
+      if (maxRadiusM > 0) {
+        const cLatArea = demandPoints.reduce((s, p) => s + p.lat, 0) / n;
+        gScale = metersPerDegreeAt(cLatArea);
+        // Inflate 5% to absorb haversine-vs-planar curvature so the broad phase
+        // is always a superset of the true in-radius set.
+        maxQueryRadiusProj = maxRadiusM * 1.05;
+        demandIndex = new DFRSpatialIndex.SpatialGrid(Math.max(1, maxQueryRadiusProj));
+        for (let j = 0; j < n; j++) demandIndex.insert(demandPoints[j].lng * gScale.lng, demandPoints[j].lat * gScale.lat, j);
+      }
+    }
+
     function candidateSetFor(candidateIdx, type, originPoint) {
       const out = [];
       let weight = 0;
+      if (demandIndex) {
+        const js = demandIndex.queryCandidates(originPoint.lng * gScale.lng, originPoint.lat * gScale.lat, maxQueryRadiusProj);
+        for (const j of js) {
+          if (covered[j]) continue;
+          const r = radiusFor(demandPoints[j], type);
+          if (haversine(originPoint, standoff[j]) > r) continue;
+          out.push(j);
+          weight += Number(demandPoints[j].weight) || 0;
+        }
+        return { set: out, weight };
+      }
       for (let j = 0; j < n; j++) {
         if (covered[j]) continue;
         const r = radiusFor(demandPoints[j], type);
@@ -2868,6 +2925,48 @@
   function deploymentIncidentsForResult(result) {
     return result && result.traceIncidents && result.traceIncidents.length ? result.traceIncidents : incidents;
   }
+
+  // Headless performance harness — verification-only, no effect on normal use.
+  // Requires an operational area (load the sample mission first). Generates N
+  // synthetic incidents in the current area and times the smoothed-demand
+  // pipeline (KDE grid build + greedy coverage), restoring the prior incident
+  // set afterwards. Returns per-N timing so runtime-at-scale can be measured
+  // and regressions caught. Exposed explicitly; never invoked by the app.
+  window.__dfrBenchmarkSmoothed = function (nList) {
+    if (!areaPolygon) throw new Error('Define an operational area first (load the sample mission).');
+    const counts = Array.isArray(nList) ? nList : [nList];
+    const out = [];
+    const savedIncidents = incidents;
+    try {
+      for (const n of counts) {
+        incidents = generateMixedUrban(n);
+        assignPriorities(incidents, getPriorityMix());
+        const planning = getPlanningParams();
+        const settings = getSmoothedGrowthSettings();
+        const t0 = performance.now();
+        const grid = buildDemandGrid(incidents, settings);
+        let demandPoints = demandGridToPoints(grid);
+        const tGrid = performance.now();
+        if (demandPoints.length > 5000) {
+          demandPoints = demandPoints.slice().sort((a, b) => (Number(b.weight) || 0) - (Number(a.weight) || 0)).slice(0, 5000);
+        }
+        const result = greedyWeightedDemandCoverage(demandPoints, updateRadius(), planning, settings, optMode === 'fleet' ? fleetTypes : null);
+        const tDone = performance.now();
+        out.push({
+          n,
+          gridMs: Math.round(tGrid - t0),
+          greedyMs: Math.round(tDone - tGrid),
+          totalMs: Math.round(tDone - t0),
+          activeCells: grid.activeCells.length,
+          stations: result.stations.length,
+          coveragePercent: Math.round(result.coveragePercent * 10) / 10
+        });
+      }
+    } finally {
+      incidents = savedIncidents;
+    }
+    return out;
+  };
 
   function createSeededRng(seed) {
     let state = (Number(seed) >>> 0) || 0x6d2b79f5;
