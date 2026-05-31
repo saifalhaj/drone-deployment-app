@@ -237,9 +237,12 @@
       if (parent && !skip.test(parent.nodeName)) nodes.push(n);
     }
     nodes.forEach(node => {
-      const raw = node.nodeValue;
-      const key = (raw || '').trim();
-      if (key && dict[key]) { homeI18nRecords.push({ node, en: raw }); node.nodeValue = raw.replace(key, dict[key]); }
+      const raw = node.nodeValue || '';
+      // Collapse the core's internal whitespace so multi-line, indented
+      // paragraphs match single-spaced dictionary keys; keep outer whitespace.
+      const m = raw.match(/^(\s*)([\s\S]*?)(\s*)$/);
+      const key = m[2].replace(/\s+/g, ' ');
+      if (key && dict[key]) { homeI18nRecords.push({ node, en: raw }); node.nodeValue = m[1] + dict[key] + m[3]; }
     });
     document.querySelectorAll('[title]').forEach(el => {
       const k = (el.getAttribute('title') || '').trim();

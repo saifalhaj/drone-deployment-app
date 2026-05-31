@@ -191,11 +191,16 @@
       if (parent && !I18N_SKIP_TAGS.test(parent.nodeName)) nodes.push(n);
     }
     for (const node of nodes) {
-      const raw = node.nodeValue;
-      const key = (raw || '').trim();
+      const raw = node.nodeValue || '';
+      // Split into leading whitespace / core / trailing whitespace, and collapse
+      // the core's internal whitespace so multi-line, indented paragraphs match
+      // the single-spaced dictionary keys. Leading/trailing whitespace is kept so
+      // inline siblings don't jam together.
+      const m = raw.match(/^(\s*)([\s\S]*?)(\s*)$/);
+      const key = m[2].replace(/\s+/g, ' ');
       if (key && dict[key]) {
         i18nTextRecords.push({ node, en: raw });
-        node.nodeValue = raw.replace(key, dict[key]); // preserve surrounding whitespace
+        node.nodeValue = m[1] + dict[key] + m[3];
       }
     }
     translateAttr(root, dict, 'placeholder', 'i18nPh');
