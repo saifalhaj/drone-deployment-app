@@ -145,6 +145,7 @@
     };
     const close = () => { modal.style.display = 'none'; };
     openBtn.addEventListener('click', open);
+    document.getElementById('aboutBtn')?.addEventListener('click', open);
     document.getElementById('aboutClose')?.addEventListener('click', close);
     modal.querySelector('.about-backdrop')?.addEventListener('click', close);
     document.getElementById('aboutPrev')?.addEventListener('click', () => showPage(currentPage - 1));
@@ -213,37 +214,89 @@
     });
   }
 
-  // Apply the language chosen in the planner's Settings (persisted in localStorage)
-  // so the landing page reflects it too. Level 1: LTR layout, Arabic text RTL
-  // within elements. English source strings are matched against the inlined
-  // Arabic dictionary (src/i18n-ar.js); misses stay English.
-  function applyStoredLanguage() {
-    try {
-      const raw = localStorage.getItem('uascDfrSettings');
-      const lang = raw ? JSON.parse(raw).lang : 'en';
-      if (lang !== 'ar' || !window.DFR_I18N_AR || !window.DFR_I18N_AR.text) return;
-      const dict = window.DFR_I18N_AR.text;
-      const skip = /^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA|CODE|PRE)$/;
-      // Walk text nodes so mixed text+element content translates too.
-      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-      const nodes = [];
-      let n;
-      while ((n = walker.nextNode())) {
-        const parent = n.parentNode;
-        if (parent && !skip.test(parent.nodeName)) nodes.push(n);
-      }
-      nodes.forEach(node => {
-        const raw = node.nodeValue;
-        const key = (raw || '').trim();
-        if (key && dict[key]) node.nodeValue = raw.replace(key, dict[key]);
+  // ---- Settings persistence (shared key with the planner) ----
+  const SETTINGS_KEY = 'uascDfrSettings';
+  function readHomeSettings() {
+    try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') || {}; } catch (e) { return {}; }
+  }
+  function writeHomeSettings(patch) {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(Object.assign(readHomeSettings(), patch))); } catch (e) { /* storage unavailable */ }
+  }
+
+  // ---- Level-1 language: live translate / restore on the landing page ----
+  // Mirrors the planner's translator. Arabic strings are matched against the
+  // inlined dictionary (src/i18n-ar.js); misses stay English. Layout stays LTR.
+  let homeI18nRecords = [];
+  function homeTranslate(dict) {
+    const skip = /^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA|CODE|PRE)$/;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+    const nodes = [];
+    let n;
+    while ((n = walker.nextNode())) {
+      const parent = n.parentNode;
+      if (parent && !skip.test(parent.nodeName)) nodes.push(n);
+    }
+    nodes.forEach(node => {
+      const raw = node.nodeValue;
+      const key = (raw || '').trim();
+      if (key && dict[key]) { homeI18nRecords.push({ node, en: raw }); node.nodeValue = raw.replace(key, dict[key]); }
+    });
+    document.querySelectorAll('[title]').forEach(el => {
+      const k = (el.getAttribute('title') || '').trim();
+      if (k && dict[k]) { if (!el.dataset.i18nTitle) el.dataset.i18nTitle = el.getAttribute('title'); el.setAttribute('title', dict[k]); }
+    });
+  }
+  function homeRestoreEnglish() {
+    homeI18nRecords.forEach(r => { try { r.node.nodeValue = r.en; } catch (e) { /* detached */ } });
+    homeI18nRecords = [];
+    document.querySelectorAll('[data-i18n-title]').forEach(el => el.setAttribute('title', el.dataset.i18nTitle));
+  }
+  function applyHomeLanguage(lang) {
+    lang = (lang === 'ar') ? 'ar' : 'en';
+    if (lang === 'ar' && window.DFR_I18N_AR && window.DFR_I18N_AR.text) homeTranslate(window.DFR_I18N_AR.text);
+    else homeRestoreEnglish();
+    document.documentElement.setAttribute('lang', lang);
+    document.documentElement.setAttribute('dir', 'ltr');
+  }
+
+  // ---- Settings panel (gear) ----
+  function wireHomeSettings() {
+    const toggle = document.getElementById('settingsToggle');
+    const panel = document.getElementById('settingsPanel');
+    if (toggle && panel) {
+      toggle.addEventListener('click', e => {
+        e.stopPropagation();
+        const open = panel.classList.toggle('open');
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
       });
-      document.querySelectorAll('[title]').forEach(el => {
-        const k = (el.getAttribute('title') || '').trim();
-        if (k && dict[k]) el.setAttribute('title', dict[k]);
+      document.addEventListener('click', e => {
+        if (!panel.classList.contains('open')) return;
+        if (panel.contains(e.target) || toggle.contains(e.target)) return;
+        panel.classList.remove('open');
+        toggle.setAttribute('aria-expanded', 'false');
       });
-      document.documentElement.setAttribute('lang', 'ar');
-      document.documentElement.setAttribute('dir', 'ltr');
-    } catch (e) { /* storage unavailable — stay English */ }
+      document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && panel.classList.contains('open')) {
+          panel.classList.remove('open');
+          toggle.setAttribute('aria-expanded', 'false');
+        }
+      });
+    }
+    const s = readHomeSettings();
+    const u = document.getElementById('unitSystem');
+    const d = document.getElementById('dateFormatSelect');
+    const c = document.getElementById('coordFormat');
+    const l = document.getElementById('langSelect');
+    if (u && (s.unitSystem === 'metric' || s.unitSystem === 'imperial')) u.value = s.unitSystem;
+    if (d && s.dateFormat) d.value = s.dateFormat;
+    if (c && s.coordFormat) c.value = s.coordFormat;
+    if (l) l.value = (s.lang === 'ar') ? 'ar' : 'en';
+    // Units / date / coords have no visual effect on the landing page; persist so
+    // the planner honours them. Language applies live here.
+    if (u) u.onchange = function () { writeHomeSettings({ unitSystem: this.value }); };
+    if (d) d.onchange = function () { writeHomeSettings({ dateFormat: this.value }); };
+    if (c) c.onchange = function () { writeHomeSettings({ coordFormat: this.value }); };
+    if (l) l.onchange = function () { writeHomeSettings({ lang: this.value }); applyHomeLanguage(this.value); };
   }
 
   updateUtcClock();
@@ -252,5 +305,6 @@
   wireAboutModal();
   wireSavedPlanLoader();
   wireTermsModal();
-  applyStoredLanguage();
+  wireHomeSettings();
+  applyHomeLanguage(readHomeSettings().lang || 'en');
 })();

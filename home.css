@@ -57,7 +57,7 @@ a { color: inherit; text-decoration: none; }
 .home-mission-bar {
   height: 56px;
   display: grid;
-  grid-template-columns: 310px 300px minmax(360px, 1fr) 128px;
+  grid-template-columns: 310px 300px minmax(360px, 1fr) auto;
   align-items: center;
   border-bottom: 1px solid var(--hairline);
   background: var(--bg-1);
@@ -820,4 +820,84 @@ a { color: inherit; text-decoration: none; }
 /* ============ ARABIC FONT (Tajawal) ============ */
 html[lang="ar"] * {
   font-family: 'Tajawal', 'Space Grotesk', sans-serif !important;
+}
+
+/* ============ LANDING HEADER ACTIONS (About + Settings) ============ */
+.home-header-actions {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 0 16px;
+}
+.home-header-actions .system-ready {
+  height: auto;
+  border-right: 0;
+  padding: 0;
+  gap: 8px;
+}
+.header-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: var(--bg-2);
+  color: var(--text-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.header-icon-btn:hover {
+  color: var(--cyan);
+  border-color: var(--border-strong);
+  background: var(--bg-1);
+}
+.settings-wrap { position: relative; }
+.settings-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 9998;
+  width: 240px;
+  padding: 14px;
+  display: none;
+  text-align: left;
+  background: var(--bg-1);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 16px 44px rgba(0,0,0,0.6);
+}
+.settings-panel.open { display: block; }
+.settings-panel-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-1);
+  margin-bottom: 12px;
+}
+.settings-panel .field { margin-bottom: 10px; }
+.settings-panel .field:last-child { margin-bottom: 0; }
+.settings-panel .field-label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-1);
+  margin-bottom: 5px;
+}
+.settings-panel select {
+  width: 100%;
+  padding: 7px 8px;
+  background: var(--bg-2);
+  color: var(--text-0);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
