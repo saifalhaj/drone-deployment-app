@@ -125,7 +125,7 @@
     ' <div class="about-mission">',
     ' <img id="aboutPageLogo" alt="UASC" class="about-logo">',
     ' <div class="about-eyebrow" style="margin-bottom: 8px;">ABOUT US</div>',
-    ' <h2>Because this work shouldn\'t start from scratch.</h2>',
+    ' <h2>From operations, for operations.</h2>',
     ' <p style="text-align: left; margin-top: 18px;">Dubai Police\'s Unmanned Aerial Systems Center developed this application from years of operational experience in building and deploying one of the region\'s leading Drone as First Responder capabilities.</p>',
     ' <p style="text-align: left;">Since 2020, our drone operations have supported more than 10,000 incidents, giving us practical insight into one of the most important questions facing any agency planning a DFR program: where should drones be placed, how many are needed, and what operational performance can realistically be achieved?</p>',
     ' <p style="text-align: left;">This tool was created to transform that experience into a practical planning capability. It allows public safety agencies, civil defense organizations, search and rescue teams, emergency medical services, ports, and critical infrastructure operators to assess deployment needs using real incident data, defined coverage areas, and measurable response objectives.</p>',
