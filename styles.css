@@ -2020,3 +2020,19 @@ input {
 .comparison-legend .dot.keep { background: #5BD6A4; }
 .comparison-legend .dot.add { background: #7CDCE8; }
 .comparison-legend .dot.cur { background: #E8A744; }
+
+/* ============ ARABIC FONT (Tajawal) ============ */
+/* When Arabic is active the language switcher sets <html lang="ar">. Fonts are
+   hardcoded per-selector across the app, so force Tajawal broadly under that
+   scope. Tajawal covers Arabic + Latin, so numbers and brand tokens stay legible. */
+html[lang="ar"] body,
+html[lang="ar"] button,
+html[lang="ar"] input,
+html[lang="ar"] select,
+html[lang="ar"] textarea,
+html[lang="ar"] .leaflet-container {
+  font-family: 'Tajawal', 'Inter', sans-serif !important;
+}
+html[lang="ar"] * {
+  font-family: 'Tajawal', 'Inter', sans-serif !important;
+}
