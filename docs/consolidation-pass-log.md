@@ -262,3 +262,38 @@ defaults, even-split + userSetMix preservation, green/amber sum, decimal→perce
 reload, generation proportions, banner dismiss + flag + re-show, MC explainer
 panel, Dubai area + text. node --check (app.js, about-modal.js) + build clean;
 no console errors; shadowing scan clean.
+
+## 2026-05-31 — Sample mission uses the real Dubai administrative boundary
+
+The sample operational area is now the real Dubai administrative boundary
+instead of a hand-drawn rectangle:
+
+- **Bundled boundary.** Extracted the Dubai feature from geoBoundaries gbOpen
+  ARE ADM1 (ODbL / OpenStreetMap — open license; the tool already shows OSM
+  attribution), decimated the largest ring 4807 → 602 vertices, and bundled it
+  at `assets/sample-boundaries/dubai.geojson` (~49 KB, copied to dist by the
+  build). The sample loader reads this same-origin file, so it never depends on
+  the external boundary API — verified it loads in ~480 ms with no network and
+  no fallback warning. The general Boundary tab still uses the live API.
+- **Same code path / fallback.** `buildSampleAreaLayer()` parses the bundled
+  GeoJSON through the existing `chooseLargestRing` → `L.polygon` path (exactly
+  what the Boundary "Use Selection" button does). If the file is somehow
+  unreadable it falls back to a coarse Dubai-shaped polygon with a console
+  warning.
+- **Clustered demand preserved.** Incidents are no longer sampled across the
+  area bounds (which would scatter them across all ~3600 km² of Dubai). A new
+  `generateSampleIncidents()` draws ~250 synthetic incidents from fixed
+  urban-core cluster centres (Downtown / Business Bay / Bur Dubai / Deira /
+  Al Karama) with ~15% scattered residential, each validated inside the active
+  area. Result: operational area = full Dubai (3601 km²), incident spread ≈
+  20 km in the urban core.
+- **Copy.** Banner → "Sample mission: Dubai administrative area (synthetic
+  urban incidents) — for evaluation only"; the Step-01 card and footer match.
+- `loadSampleDataset()` is now async (awaits the bundled fetch); its callers
+  (button + ?sample=1 deep link) handle the promise with a catch.
+
+Verified: Dubai-shaped area (not a rectangle), 250 clustered incidents, banner
+copy, <3 s load with no external call, and all three planning modes compute
+(Smoothed 35 sites / 88%, Direct Fit 22 / 90%, Monte Carlo completes — and its
+empty robust-core explainer shows at the default threshold). node --check +
+build clean; no console errors/warnings; shadowing scan clean.

@@ -140,7 +140,7 @@
       'onboarding.body': 'Plan where to place DroneBox first-responder stations and how many drones each needs to meet your response-time targets. Choose your display preferences below — you can change them any time from the gear icon in the header.',
       'onboarding.continue': 'Continue',
       'map.heatmap.toggle': 'Toggle incident-density heatmap',
-      'sample.banner': 'Sample mission: Dubai (representative urban deployment) — for evaluation only',
+      'sample.banner': 'Sample mission: Dubai administrative area (synthetic urban incidents) — for evaluation only',
       'sample.load': 'Load Sample Mission',
       'step02.advanced': 'Advanced',
       'step02.timeWindow.override': 'Override',
@@ -3736,7 +3736,9 @@
       } catch (e) { /* history API unavailable — non-fatal */ }
       try {
         saveStoredSettings();
-        loadSampleDataset();
+        Promise.resolve(loadSampleDataset()).catch(function(err) {
+          console.error('[DFR] Sample mission failed to load from ?sample=1; empty planner shown.', err);
+        });
       } catch (e) {
         console.error('[DFR] Failed to auto-load sample mission from ?sample=1; falling back to empty planner.', e);
       }
@@ -4752,23 +4754,79 @@
     setTimeout(function() { if (banner.classList.contains('dismissing')) banner.style.display = 'none'; }, 260);
   }
 
-  // Loads a representative real-Dubai urban operational area (Downtown / Business
-  // Bay / Bur Dubai, ~80 km²) plus ~250 SYNTHETIC incidents with a realistic
-  // urban spatial pattern and a 30-day timestamp span — so evaluators can run the
-  // tool end-to-end without uploading sensitive data. Geography is real Dubai;
-  // the incidents are entirely fabricated (no real Dubai Police data).
-  function loadSampleDataset() {
-    resetAll();
-    // Representative Dubai urban core (~80 km²): high-density commercial
-    // (Downtown / Business Bay) plus mixed-use residential (Bur Dubai / Deira).
-    const bounds = L.latLngBounds([25.18, 55.25], [25.27, 55.33]);
-    const rect = L.rectangle(bounds, { color: '#7CDCE8', weight: 1.5, dashArray: '4,4', fillColor: '#7CDCE8', fillOpacity: 0.12 });
-    handleAreaCreated(rect);
-    if (map.fitBounds) map.fitBounds(bounds, { padding: [40, 40] });
+  const SAMPLE_AREA_STYLE = { color: '#7CDCE8', weight: 1.5, dashArray: '4,4', fillColor: '#7CDCE8', fillOpacity: 0.12 };
+  // Coarse Dubai-shaped fallback used only if the bundled boundary can't be read.
+  const DUBAI_FALLBACK_RING = [
+    [25.34, 55.29], [25.30, 55.55], [24.92, 55.56], [24.80, 55.20],
+    [24.98, 55.08], [25.20, 55.05], [25.30, 55.20], [25.34, 55.29]
+  ];
 
-    // ~250 synthetic incidents with a mixed-urban pattern (commercial-district
-    // clusters plus scattered residential calls). Fast to compute end-to-end.
-    incidents = generateMixedUrban(250);
+  // Build the sample operational-area polygon from the bundled real Dubai
+  // administrative boundary (assets/sample-boundaries/dubai.geojson — geoBoundaries
+  // gbOpen ARE ADM1, ODbL). Reading a same-origin bundled file means the sample
+  // never depends on the external boundary API. Falls back to a coarse Dubai
+  // polygon if the file is somehow unavailable.
+  async function buildSampleAreaLayer() {
+    try {
+      const res = await fetch('../assets/sample-boundaries/dubai.geojson', { cache: 'force-cache' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const geo = await res.json();
+      const feature = (geo && geo.type === 'FeatureCollection') ? geo.features[0] : geo;
+      const ring = chooseLargestRing(feature);
+      if (!ring || ring.length < 3) throw new Error('No usable ring in bundled Dubai boundary');
+      return L.polygon(ring.map(pt => [pt.lat, pt.lng]), SAMPLE_AREA_STYLE);
+    } catch (e) {
+      console.warn('[DFR] Bundled Dubai boundary unavailable; using a coarse fallback polygon.', e);
+      return L.polygon(DUBAI_FALLBACK_RING, SAMPLE_AREA_STYLE);
+    }
+  }
+
+  // ~250 SYNTHETIC incidents clustered in Dubai's urban core (commercial
+  // districts plus scattered residential calls), independent of the operational-
+  // area size — so demand stays realistically concentrated even though the area
+  // is the full Dubai jurisdiction. Points are validated against the active area.
+  function generateSampleIncidents(count) {
+    const centers = [
+      { lat: 25.1972, lng: 55.2744, w: 1.0, sigma: 850 },  // Downtown / Burj Khalifa
+      { lat: 25.1860, lng: 55.2620, w: 0.85, sigma: 800 }, // Business Bay
+      { lat: 25.2530, lng: 55.2970, w: 0.75, sigma: 900 }, // Bur Dubai
+      { lat: 25.2690, lng: 55.3110, w: 0.65, sigma: 950 }, // Deira
+      { lat: 25.2300, lng: 55.2820, w: 0.45, sigma: 700 }  // Al Karama (mixed-use)
+    ];
+    const total = centers.reduce((s, c) => s + c.w, 0);
+    const out = [];
+    let attempts = 0;
+    const maxAttempts = count * 300;
+    while (out.length < count && attempts < maxAttempts) {
+      attempts++;
+      let p;
+      if (Math.random() < 0.85) {
+        let r = Math.random() * total, idx = 0;
+        for (let i = 0; i < centers.length; i++) { r -= centers[i].w; if (r <= 0) { idx = i; break; } }
+        const c = centers[idx];
+        const dlat = (gaussianRandom() * c.sigma) / 111320;
+        const dlng = (gaussianRandom() * c.sigma) / (111320 * Math.cos(c.lat * Math.PI / 180));
+        p = { lat: c.lat + dlat, lng: c.lng + dlng };
+      } else {
+        // scattered residential calls across the wider urban footprint
+        p = { lat: 25.16 + Math.random() * 0.16, lng: 55.23 + Math.random() * 0.14 };
+      }
+      if (isValidLocation(p)) out.push(p);
+    }
+    return out;
+  }
+
+  // Loads the real Dubai administrative boundary as the operational area plus
+  // ~250 SYNTHETIC incidents clustered in the urban core — evaluators can run the
+  // tool end-to-end without uploading data. Geography is real Dubai; incidents
+  // are entirely fabricated (no real Dubai Police data).
+  async function loadSampleDataset() {
+    resetAll();
+    const areaLayer = await buildSampleAreaLayer();
+    handleAreaCreated(areaLayer);
+    if (map.fitBounds) map.fitBounds(areaLayer.getBounds(), { padding: [20, 20] });
+
+    incidents = generateSampleIncidents(250);
     const spanHours = 720; // 30 days
     const anchorMs = Date.now() - spanHours * 3600000;
     assignTimestamps(incidents, spanHours);
@@ -4794,11 +4852,15 @@
     updateIncidentStats({ realTimestamps: true, anchorMs, spanHours });
     syncStepNavButtons();
     setSampleDataLoaded(true);
-    setFooter('Sample mission: Dubai (representative geography, synthetic incidents) — for evaluation only');
+    setFooter('Sample mission: Dubai administrative area (synthetic urban incidents) — for evaluation only');
   }
 
   const loadSampleBtn = document.getElementById('loadSampleBtn');
-  if (loadSampleBtn) loadSampleBtn.onclick = loadSampleDataset;
+  if (loadSampleBtn) loadSampleBtn.onclick = function() {
+    Promise.resolve(loadSampleDataset()).catch(function(err) {
+      console.error('[DFR] Sample mission failed to load.', err);
+    });
+  };
   // The banner markup lives after this script in the DOM, so wire its dismiss
   // button once the document is parsed.
   (function wireSampleBannerDismiss() {
