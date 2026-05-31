@@ -1881,18 +1881,17 @@ input {
 .attribution-license { color: var(--text-dim); margin-top: 8px; }
 
 /* ============ STEP 01 SAMPLE-DATA CALLOUT ============ */
-/* Stacked layout: the sidebar is narrow, so the text reads full-width with the
-   full-width button below it (the base .btn is width:100%). */
-.sample-callout {
-  display: flex; flex-direction: column; gap: 10px;
-  padding: 12px; margin-bottom: 14px;
-  background: rgba(124, 220, 232, 0.06);
-  border: 1px solid rgba(124, 220, 232, 0.3); border-radius: 6px;
+/* Quiet "Just exploring?" affordance at the top of Mission & Toolkit. Kept
+   visually subdued (no fill, content-width outlined button) so it does not
+   compete with the panel heading — the primary sample CTA is on the landing
+   page. Total footprint ~ one or two form fields. */
+.sample-mini { margin: 8px 0 14px; }
+.sample-mini-eyebrow {
+  font-family: 'JetBrains Mono'; font-size: 10px; letter-spacing: 0.8px;
+  text-transform: uppercase; color: var(--text-muted); margin-bottom: 3px;
 }
-.sample-callout-text { display: flex; flex-direction: column; gap: 3px; }
-.sample-callout-text strong { font-size: 12px; color: var(--text); }
-.sample-callout-text span { font-size: 11px; color: var(--text-muted); line-height: 1.45; }
-.sample-callout .btn { width: 100%; }
+.sample-mini-desc { font-size: 11px; color: var(--text-dim); line-height: 1.4; margin-bottom: 8px; }
+.sample-mini-btn { width: auto; padding: 5px 12px; font-size: 11px; }
 
 /* ============ PLANNING MODE BRIEFS ============ */
 .mode-brief {

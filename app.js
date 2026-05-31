@@ -140,8 +140,8 @@
       'onboarding.body': 'Plan where to place DroneBox first-responder stations and how many drones each needs to meet your response-time targets. Choose your display preferences below — you can change them any time from the gear icon in the header.',
       'onboarding.continue': 'Continue',
       'map.heatmap.toggle': 'Toggle incident-density heatmap',
-      'sample.banner': 'Sample data loaded — for evaluation only',
-      'sample.load': 'Load sample dataset',
+      'sample.banner': 'Sample mission loaded — for evaluation only',
+      'sample.load': 'Load Sample Mission',
       'step02.advanced': 'Advanced',
       'step02.timeWindow.override': 'Override',
       'about.builtWith': 'Built with'
@@ -3638,6 +3638,33 @@
   syncPlanningModeControls();
   initLocaleSettings();
 
+  // Landing-page deep link: planner/index.html?sample=1 auto-loads the sample
+  // mission. Suppress onboarding synchronously (the user already opted in via the
+  // CTA), then load + strip the param once the DOM is ready so a reload doesn't
+  // re-trigger it. Any other value (e.g. ?sample=0) is treated as absent.
+  (function handleSampleDeepLink() {
+    let arrivedViaSample = false;
+    try { arrivedViaSample = new URLSearchParams(window.location.search).get('sample') === '1'; } catch (e) { return; }
+    if (!arrivedViaSample) return;
+    window.__dfrOnboardingNeeded = false;
+    const runSample = function() {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        params.delete('sample');
+        const qs = params.toString();
+        history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+      } catch (e) { /* history API unavailable — non-fatal */ }
+      try {
+        saveStoredSettings();
+        loadSampleDataset();
+      } catch (e) {
+        console.error('[DFR] Failed to auto-load sample mission from ?sample=1; falling back to empty planner.', e);
+      }
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', runSample);
+    else setTimeout(runSample, 0);
+  })();
+
   // Map-mounted heatmap layer toggle, placed with the basemap layer control in
   // the top-right corner. Replaces the removed Step 02 Demand Heatmap panel; the
   // heatmap always shows incident density (heatmapMode stays 'all').
@@ -4662,7 +4689,7 @@
     setPanelState('panel3', null);
     document.getElementById('optimizeBtn').disabled = false;
     const status2 = document.getElementById('status2');
-    if (status2) { status2.textContent = `${incidents.length} sample incidents loaded (Sample City)`; status2.classList.add('good'); }
+    if (status2) { status2.textContent = `Sample City mission loaded — ${incidents.length} incidents`; status2.classList.add('good'); }
     document.getElementById('m-incidents').textContent = incidents.length;
     document.getElementById('m-stations').textContent = '—';
     document.getElementById('m-coverage').textContent = '—';
@@ -4673,7 +4700,7 @@
     updateIncidentStats({ realTimestamps: true, anchorMs, spanHours });
     syncStepNavButtons();
     setSampleDataLoaded(true);
-    setFooter('Sample dataset loaded — for evaluation only');
+    setFooter('Sample mission loaded — for evaluation only');
   }
 
   const loadSampleBtn = document.getElementById('loadSampleBtn');

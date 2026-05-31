@@ -107,6 +107,12 @@
  <input type="hidden" id="responseTime" value="60">
  <input type="hidden" id="kpiServiceLevel" value="0.95">
 
+ <div class="sample-mini">
+ <div class="sample-mini-eyebrow">Just exploring?</div>
+ <div class="sample-mini-desc">Load a ready-made "Sample City" mission to explore the tool end-to-end.</div>
+ <button class="btn btn-ghost sample-mini-btn" type="button" id="loadSampleBtn">Load Sample Mission</button>
+ </div>
+
  <div class="subsection-label" style="margin-top: 6px;">Objective</div>
  <div class="mode-tabs" role="tablist" style="margin-bottom: 10px;">
  <button class="mode-tab active" data-mode="minimize">Calculate Required</button>
@@ -165,14 +171,6 @@
  <span class="panel-title">Define Operational Area</span>
  </div>
  <p class="help">Choose how to define the operational area. Add <strong>No-Fly Zones</strong> (drones cannot enter) and <strong>No-Deploy Zones</strong> (stations cannot be placed, but drones may still fly through). Each layer can be saved as KMZ for reuse.</p>
-
- <div class="sample-callout">
- <div class="sample-callout-text">
- <strong>Just exploring?</strong>
- <span>Load a ready-made "Sample City" — area + incidents — and run the full workflow end-to-end.</span>
- </div>
- <button class="btn btn-secondary" type="button" id="loadSampleBtn">Load sample dataset</button>
- </div>
 
  <div class="subsection-label">Operational Area</div>
  <div class="mode-tabs area-method-tabs" role="group" aria-label="Operational area source">
@@ -724,7 +722,7 @@
 <!-- ============ SAMPLE DATA BANNER ============ -->
 <div id="sampleDataBanner" class="sample-banner" style="display:none;">
  <span class="sample-banner-dot"></span>
- <span id="sampleBannerText">Sample data loaded — for evaluation only</span>
+ <span id="sampleBannerText">Sample mission loaded — for evaluation only</span>
  <button class="sample-banner-clear" id="sampleBannerClear" type="button">Clear</button>
 </div>
 

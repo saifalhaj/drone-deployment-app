@@ -193,3 +193,30 @@ scan ran before/around the About de-dup and did not see `src/about-modal.js`):
 - About modal renders identically on landing and planner from the single source.
 - `node --check` clean for `app.js`, `home.js`, `src/about-modal.js`; `node
   build.js` produces both dist outputs; no console errors; shadowing scan clean.
+
+## 2026-05-31 — Sample mission: discoverability + deep link
+
+1. Relabeled "Load sample dataset" → **"Load Sample Mission"** (a mission =
+   area + zones + categories + incidents, not just data). Updated the banner
+   ("Sample mission loaded — for evaluation only"), footer/status strings, and
+   i18n entries. Internal names (`loadSampleDataset`, `sampleDataLoaded`,
+   `#loadSampleBtn`, `#sampleDataBanner`) left as-is (no value in churn).
+2. Moved the in-planner affordance from Step 01 to the top of Mission & Toolkit
+   (above Objective), with a deliberately QUIET treatment: small "Just
+   exploring?" eyebrow, one-line description, and an outlined `btn-ghost`
+   content-width button (`.sample-mini`, ~80px footprint) so the panel heading
+   stays the focus. The old filled `.sample-callout` styles were removed.
+3. Landing-page hero CTAs: primary **"TRY WITH SAMPLE MISSION →"** (filled,
+   → `planner/?sample=1`) and outlined **"OPEN PLANNER"** (→ `planner/`), beside
+   the existing Load Saved Plan / Why This Tool buttons. Used the directory form
+   (`planner/?sample=1`) rather than `planner/index.html?sample=1` because clean-
+   URL static servers (incl. the local `serve` dev server) 301-redirect the
+   explicit-file form and drop the query string; the directory form preserves it
+   in dev and production.
+4. Planner deep link: on init, `?sample=1` auto-loads the sample mission, skips
+   onboarding (intent already expressed), persists default settings so onboarding
+   won't resurface, shows the banner, and strips the param via
+   `history.replaceState` so a reload doesn't re-trigger. `?sample=0`/other →
+   ignored; load failure → caught, logged, empty planner. Verified end-to-end via
+   the real landing CTA click: sample loads, onboarding skipped, banner shown,
+   URL cleaned to `/planner/`, and a subsequent reload does not re-trigger.
