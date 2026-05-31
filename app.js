@@ -3840,10 +3840,9 @@
   function renderIncidents(coveredArr) {
     lastIncidentCoverage = Array.isArray(coveredArr) ? coveredArr.slice() : coveredArr;
     incidentLayer.clearLayers();
-    if (heatmapEnabled) {
-      refreshHeatmap();
-      return;
-    }
+    // Incident pins are drawn whether or not the demand heatmap is on, so the
+    // input context (incidents + heatmap) stays visible alongside the computed
+    // stations/coverage. The heatmap (refreshHeatmap below) overlays them.
     // Higher-weight categories render larger; uncovered get a contrasting outline
     const weights = incidentCategories.map(c => c.weight || 0);
     const maxW = Math.max(1, ...weights);
@@ -4840,52 +4839,35 @@
     }
   }
 
-  // ~250 SYNTHETIC incidents clustered in Dubai's urban core (commercial
-  // districts plus scattered residential calls), independent of the operational-
-  // area size — so demand stays realistically concentrated even though the area
-  // is the full Dubai jurisdiction. Points are validated against the active area.
-  function generateSampleIncidents(count) {
-    const centers = [
-      { lat: 25.1972, lng: 55.2744, w: 1.0, sigma: 850 },  // Downtown / Burj Khalifa
-      { lat: 25.1860, lng: 55.2620, w: 0.85, sigma: 800 }, // Business Bay
-      { lat: 25.2530, lng: 55.2970, w: 0.75, sigma: 900 }, // Bur Dubai
-      { lat: 25.2690, lng: 55.3110, w: 0.65, sigma: 950 }, // Deira
-      { lat: 25.2300, lng: 55.2820, w: 0.45, sigma: 700 }  // Al Karama (mixed-use)
-    ];
-    const total = centers.reduce((s, c) => s + c.w, 0);
-    const out = [];
-    let attempts = 0;
-    const maxAttempts = count * 300;
-    while (out.length < count && attempts < maxAttempts) {
-      attempts++;
-      let p;
-      if (Math.random() < 0.85) {
-        let r = Math.random() * total, idx = 0;
-        for (let i = 0; i < centers.length; i++) { r -= centers[i].w; if (r <= 0) { idx = i; break; } }
-        const c = centers[idx];
-        const dlat = (gaussianRandom() * c.sigma) / 111320;
-        const dlng = (gaussianRandom() * c.sigma) / (111320 * Math.cos(c.lat * Math.PI / 180));
-        p = { lat: c.lat + dlat, lng: c.lng + dlng };
-      } else {
-        // scattered residential calls across the wider urban footprint
-        p = { lat: 25.16 + Math.random() * 0.16, lng: 55.23 + Math.random() * 0.14 };
-      }
-      if (isValidLocation(p)) out.push(p);
-    }
-    return out;
-  }
-
-  // Loads the real Dubai administrative boundary as the operational area plus
-  // ~250 SYNTHETIC incidents clustered in the urban core — evaluators can run the
-  // tool end-to-end without uploading data. Geography is real Dubai; incidents
-  // are entirely fabricated (no real Dubai Police data).
+  // Loads the real Dubai administrative boundary as the operational area plus a
+  // preset realistic-Dubai scenario: the Optimus platform, Critical/Urgent
+  // categories (20/80 mix), and ~1200 SYNTHETIC incidents spread across Dubai
+  // with a mixed-urban pattern. Geography is real Dubai; incidents are entirely
+  // fabricated (no real Dubai Police data).
   async function loadSampleDataset() {
     resetAll();
     const areaLayer = await buildSampleAreaLayer();
     handleAreaCreated(areaLayer);
     if (map.fitBounds) map.fitBounds(areaLayer.getBounds(), { padding: [20, 20] });
 
-    incidents = generateSampleIncidents(250);
+    // Preset platform → Optimus (applies its speed / radius / cycle time).
+    const presetSel = document.getElementById('minimizePreset');
+    if (presetSel) {
+      presetSel.value = 'optimus-amrobotics';
+      if (typeof presetSel.onchange === 'function') presetSel.onchange();
+    }
+
+    // Preset incident categories: Critical 20% + Urgent 80% (no Routine). Marked
+    // user-set so the mix is preserved; it drives both generation and siting.
+    incidentCategories = [
+      { id: 'cat_default', name: 'Critical', color: CATEGORY_COLOR_POOL[0], kpiSec: 60, serviceLevel: 0.95, weight: 0.2, userSetMix: true },
+      { id: newCategoryId(), name: 'Urgent', color: CATEGORY_COLOR_POOL[1], kpiSec: 90, serviceLevel: 0.90, weight: 0.8, userSetMix: true }
+    ];
+    renderCategoriesList();
+    populateHeatmapCategories();
+
+    // ~1200 synthetic incidents, mixed-urban distribution within the Dubai area.
+    incidents = generateMixedUrban(1200);
     const spanHours = 720; // 30 days
     const anchorMs = Date.now() - spanHours * 3600000;
     assignTimestamps(incidents, spanHours);
@@ -5141,7 +5123,7 @@
           const stopLabel = activeMode === PLANNING_MODE.SMOOTHED_GROWTH
             ? `next station would add less than ${(result.minMarginalShare * 100).toFixed(1)}% of weighted demand`
             : `next station would cover fewer than ${planning.minIncidentsPerSite} incident${planning.minIncidentsPerSite === 1 ? '' : 's'}`;
-          statusText += `<br><span style="color:var(--incident)">Target stopped early: ${stopLabel}</span>`;
+          statusText += `<br><span style="color:var(--text-muted)">Target stopped early: ${stopLabel}</span>`;
         }
         if (optMode === 'fleet' && result.inventoryUsed) {
           const used = result.inventoryUsed.filter(t => t.used > 0).map(t => `${t.used}× ${t.name}`).join(' · ');

@@ -336,3 +336,34 @@ toggles; overlay appears immediately on Compute in every mode with the right
 text (Smoothed/Direct Fit no bar, Monte Carlo dynamic text + bar 60→100%) and
 hides on completion; button disabled during compute; About page 2 reframed.
 node --check + build clean; no console errors; shadowing scan clean.
+
+## 2026-05-31 — Sample preset (Optimus / 20-80 / 1200), layer preservation, neutral "stopped early"
+
+1. **Sample mission preset.** `loadSampleDataset()` now presets a realistic Dubai
+   scenario on top of the real Dubai boundary: platform → Optimus
+   (`optimus-amrobotics`, applies its 55 km/h speed, 5 km radius, 6 min cycle);
+   incident categories replaced with exactly Critical 20% + Urgent 80% (no
+   Routine), marked user-set; and 1200 synthetic incidents (up from 250) via the
+   existing mixed-urban distribution within the Dubai area. The fixed urban-core
+   generator was removed. Generation proportions follow the 20/80 mix as before.
+2. **Preserve input layers after compute.** `renderIncidents()` early-returned
+   when the heatmap was on, clearing the incident pins. Removed that early return
+   so the incident pins are always drawn and the demand heatmap overlays them;
+   station markers (DOM) stay on top. Incidents + heatmap now remain visible
+   alongside the computed stations/coverage in all three modes (the heatmap
+   toggle is now additive rather than replacing the pins).
+3. **"Stopped early" status neutral, not red.** The informational "Target stopped
+   early: …" message (shared by Smoothed Demand and Direct Fit) changed from
+   `var(--incident)` red to `var(--text-muted)` neutral gray; wording unchanged.
+   Genuine error/invalid-state reds (compute-failed status, Monte Carlo failure,
+   fleet shortfall, the MC data-quality caveat) are untouched. Monte Carlo has no
+   separate "stopped early" message.
+
+Runtime at 1200 incidents (real Dubai area): Smoothed Demand ~9.4 s (under the
+10 s threshold; the loading overlay covers the wait), Direct Fit ~0.7 s.
+
+Verified headless: sample presets Optimus + Critical 20 / Urgent 80 + 1200
+incidents; Smoothed/Direct Fit compute (25 / 130 stations) with the overlay and
+hide it on completion; heatmap toggle preserves the 1200 incidents; "stopped
+early" renders in neutral gray (rgb(136,147,162)) in both Smoothed and Direct
+Fit. node --check + build clean; no console errors; shadowing scan clean.
