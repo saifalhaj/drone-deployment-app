@@ -405,6 +405,12 @@ code { font-family: 'JetBrains Mono'; font-size: 10.5px; background: var(--surfa
 .cat-fields input {
   padding: 5px 7px !important; font-size: 12px !important;
 }
+.cat-mix-sum {
+  font-family: 'JetBrains Mono'; font-size: 10px; letter-spacing: 0.5px;
+  margin: 7px 0 2px;
+}
+.cat-mix-sum.ok { color: var(--ok); }
+.cat-mix-sum.warn { color: var(--amber); }
 
 .prio-pill {
   display: inline-block; padding: 1px 5px; border-radius: 2px;
@@ -1834,13 +1840,28 @@ input {
   background: rgba(227, 139, 79, 0.16); border: 1px solid rgba(227, 139, 79, 0.5);
   color: #f0c8a0; font-size: 12px; font-weight: 500;
   box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+  opacity: 1; transition: opacity 0.25s ease;
 }
+.sample-banner.dismissing { opacity: 0; }
 .sample-banner-dot { width: 8px; height: 8px; border-radius: 50%; background: #e8a744; box-shadow: 0 0 8px rgba(232,167,68,0.7); }
-.sample-banner-clear {
-  background: transparent; border: 1px solid rgba(240,200,160,0.45); color: #f0c8a0;
-  border-radius: 12px; font-size: 11px; padding: 2px 10px; cursor: pointer;
+.sample-banner-dismiss {
+  background: transparent; border: 0; color: #f0c8a0;
+  font-size: 16px; line-height: 1; padding: 0 2px 2px; margin-left: 2px; cursor: pointer;
+  opacity: 0.75; transition: opacity 0.15s;
 }
-.sample-banner-clear:hover { background: rgba(240,200,160,0.12); }
+.sample-banner-dismiss:hover { opacity: 1; }
+
+/* Monte Carlo empty robust-core explainer */
+.mc-empty-explainer {
+  margin-top: 10px; padding: 10px 12px;
+  border: 1px solid var(--amber); border-left-width: 3px;
+  border-radius: 4px; background: rgba(232, 167, 68, 0.08);
+  color: var(--text); font-size: 11px; line-height: 1.5;
+}
+.mc-empty-explainer p { margin: 0 0 6px; }
+.mc-empty-explainer p:last-child { margin-bottom: 0; }
+.mc-empty-explainer ul { margin: 0 0 6px; padding-left: 16px; }
+.mc-empty-explainer li { margin-bottom: 5px; }
 
 /* ============ MAP HEATMAP TOGGLE CONTROL ============ */
 .heatmap-map-toggle a {

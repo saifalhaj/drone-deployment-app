@@ -140,7 +140,7 @@
       'onboarding.body': 'Plan where to place DroneBox first-responder stations and how many drones each needs to meet your response-time targets. Choose your display preferences below — you can change them any time from the gear icon in the header.',
       'onboarding.continue': 'Continue',
       'map.heatmap.toggle': 'Toggle incident-density heatmap',
-      'sample.banner': 'Sample mission loaded — for evaluation only',
+      'sample.banner': 'Sample mission: Dubai (representative urban deployment) — for evaluation only',
       'sample.load': 'Load Sample Mission',
       'step02.advanced': 'Advanced',
       'step02.timeWindow.override': 'Override',
@@ -1882,17 +1882,50 @@
 
   function newCategoryId() { return 'cat_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
+  // Operationally conventional default names: Critical (first), then Urgent,
+  // Routine, then alphabetic fallback (Category D, E, ...) for the unusual case.
+  function defaultCategoryName(idx) {
+    if (idx === 1) return 'Urgent';
+    if (idx === 2) return 'Routine';
+    return 'Category ' + String.fromCharCode(65 + idx);
+  }
+
+  // Even-split the Category Mix across categories the user has NOT manually
+  // edited (userSetMix). Manually-set categories keep their value; the rest
+  // share the remaining mix evenly, with the last absorbing rounding. Weights
+  // are stored as decimals (0–1); the UI shows/accepts percentages.
+  function redistributeMix() {
+    let userSum = 0;
+    const autoCats = [];
+    for (const c of incidentCategories) {
+      if (c.userSetMix) userSum += Math.max(0, c.weight || 0);
+      else autoCats.push(c);
+    }
+    const n = autoCats.length;
+    if (n === 0) return;
+    const remPct = Math.max(0, Math.round((1 - userSum) * 100));
+    const base = Math.floor(remPct / n);
+    autoCats.forEach((c, i) => {
+      const pct = (i === n - 1) ? (remPct - base * (n - 1)) : base;
+      c.weight = pct / 100;
+    });
+  }
+
   function addCategory(seed) {
     seed = seed || {};
     const idx = incidentCategories.length;
-    incidentCategories.push({
+    const cat = {
       id: seed.id || newCategoryId(),
-      name: seed.name || ('Category ' + String.fromCharCode(65 + idx)),
+      name: seed.name || defaultCategoryName(idx),
       color: seed.color || CATEGORY_COLOR_POOL[idx % CATEGORY_COLOR_POOL.length],
       kpiSec: seed.kpiSec != null ? seed.kpiSec : 90,
       serviceLevel: seed.serviceLevel != null ? seed.serviceLevel : 0.90,
-      weight: seed.weight != null ? seed.weight : 1
-    });
+      weight: seed.weight != null ? seed.weight : 0
+    };
+    if (seed.userSetMix) cat.userSetMix = true;
+    incidentCategories.push(cat);
+    // Only auto-balance the mix when the caller didn't pin an explicit weight.
+    if (seed.weight == null) redistributeMix();
     renderCategoriesList();
     populateHeatmapCategories();
     refreshHeatmap();
@@ -1908,9 +1941,32 @@
         if (!incidentCategories.some(c => c.id === inc.priority)) inc.priority = fallback;
       }
     }
+    redistributeMix();
     renderCategoriesList();
     populateHeatmapCategories();
     renderIncidents(null);
+  }
+
+  // Display a decimal weight (0–1) as a mix percentage: 0.2 -> "20", 0.333 -> "33.3".
+  function formatMixPct(weight) {
+    const pct = Math.round((Math.max(0, weight || 0)) * 1000) / 10;
+    return Number.isInteger(pct) ? String(pct) : pct.toFixed(1);
+  }
+
+  // Inline sum indicator under the category list: green at exactly 100%, amber otherwise.
+  function updateMixSumIndicator() {
+    const el = document.getElementById('categoryMixSum');
+    if (!el) return;
+    const sumPct = incidentCategories.reduce((s, c) => s + Math.max(0, c.weight || 0) * 100, 0);
+    const rounded = Math.round(sumPct * 10) / 10;
+    const display = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+    if (Math.abs(rounded - 100) < 0.05) {
+      el.textContent = `Sum: ${display}%`;
+      el.className = 'cat-mix-sum ok';
+    } else {
+      el.textContent = `Sum: ${display}% (should equal 100%)`;
+      el.className = 'cat-mix-sum warn';
+    }
   }
 
   function renderCategoriesList() {
@@ -1943,13 +1999,14 @@
             <input type="number" data-field="serviceLevel" value="${Math.round(c.serviceLevel * 100)}" min="50" max="100" step="1">
           </div>
           <div class="field">
-            <label class="field-label" title="Relative priority for this category in the algorithm. Higher values mean the optimizer prioritizes covering these incidents first.">Priority Weight</label>
-            <input type="number" data-field="weight" value="${c.weight}" min="0" step="0.5">
+            <label class="field-label" title="The expected percentage of incidents in this category. Values across all categories should sum to 100. The optimizer uses this both to generate synthetic incidents proportionally and to prioritize coverage of higher-mix categories.">Category Mix (%)</label>
+            <input type="number" data-field="weight" value="${formatMixPct(c.weight)}" min="0" max="100" step="0.1">
           </div>
         </div>
       `;
       container.appendChild(card);
     });
+    updateMixSumIndicator();
 
     container.querySelectorAll('.cat-remove').forEach(btn => {
       btn.onclick = () => removeCategory(btn.closest('.cat-card').dataset.id);
@@ -1967,6 +2024,13 @@
           this.closest('.cat-card').style.borderLeftColor = this.value;
         }
         else if (field === 'serviceLevel') cat.serviceLevel = (parseFloat(this.value) || 0) / 100;
+        else if (field === 'weight') {
+          // UI is a percentage; store as a decimal (0–1). Mark as user-set so
+          // add/remove redistribution won't overwrite it.
+          cat.weight = Math.max(0, (parseFloat(this.value) || 0) / 100);
+          cat.userSetMix = true;
+          updateMixSumIndicator();
+        }
         else cat[field] = parseFloat(this.value) || 0;
         // Re-render incidents to reflect color/name changes immediately
         if (field === 'color' || field === 'name') renderIncidents(null);
@@ -3278,19 +3342,35 @@
   function renderMonteCarloHeadline(result) {
     const confidencePct = Math.round((result.settings.confidenceLevel || 0.9) * 100);
     const robustCount = result.stationAggregation.robustCore.length;
+    const thresholdPct = result.settings.robustCoreThresholdPct || 60;
     document.getElementById('m-stations').textContent = robustCount;
     document.getElementById('m-units').textContent = Math.round(result.intervals.unitCount.median);
     document.getElementById('m-coverage').innerHTML = `${confidencePct}<span class="metric-unit">% CI</span>`;
     document.getElementById('m-kpi').innerHTML = `${result.intervals.kpiPct.median.toFixed(1)}<span class="metric-unit">%</span>`;
     setDeploymentSnapshotVisible(true);
     let statusHtml = `<strong>Monte Carlo complete</strong> - ${result.summaries.length} runs in ${(result.runtimeMs / 1000).toFixed(1)}s`;
-    statusHtml += `<br>Robust core: ${robustCount} station bin${robustCount === 1 ? '' : 's'} @ ${result.settings.robustCoreThresholdPct}% threshold`;
+    if (robustCount === 0) {
+      statusHtml += `<br><strong style="color:var(--amber)">No locations met the ${thresholdPct}% robustness threshold</strong>`;
+    } else {
+      statusHtml += `<br>Robust core: ${robustCount} station bin${robustCount === 1 ? '' : 's'} @ ${thresholdPct}% threshold`;
+    }
     statusHtml += `<br>Median KPI: ${result.intervals.kpiPct.median.toFixed(1)}% | ${confidencePct}% KPI CI ${formatInterval(result.intervals.kpiPct)}%`;
     statusHtml += `<br>Station count CI ${formatInterval(result.intervals.stationCount, 0)} | Units CI ${formatInterval(result.intervals.unitCount, 0)} | Load CI ${formatInterval(result.intervals.loadPct)}%`;
     statusHtml += `<br>Aggregation bin: ${formatDistance(result.binMeters)} | temporal model: ${result.temporalProfile.temporalModelQuality}`;
     const loadContext = monteCarloLoadContext(result);
     if (loadContext) statusHtml += `<br><span style="color:var(--amber)">${escapeHtml(loadContext)}</span>`;
     if (result.warnings && result.warnings.length) statusHtml += `<br><span style="color:var(--incident)">${escapeHtml(result.warnings[0])}</span>`;
+    if (robustCount === 0) {
+      const n = incidents.length;
+      statusHtml += `<div class="mc-empty-explainer">`
+        + `<p>The Monte Carlo aggregator found no station location that appeared in at least ${thresholdPct}% of synthetic future scenarios. This typically means one of two things:</p>`
+        + `<ul>`
+        + `<li><strong>The dataset is too small to constrain location confidently.</strong> Recommended minimum is 100 incidents per planning area; current dataset has ${n} incident${n === 1 ? '' : 's'}.</li>`
+        + `<li><strong>The demand pattern is too dispersed for the robustness threshold.</strong> You can lower the threshold in Advanced settings (current: ${thresholdPct}%) to surface candidate locations as alternatives.</li>`
+        + `</ul>`
+        + `<p>The map shows the top-frequency candidates as alternative locations — these are the most likely sites across runs, but not confidently robust.</p>`
+        + `</div>`;
+    }
     const status = document.getElementById('status3');
     if (status) {
       status.innerHTML = statusHtml;
@@ -4653,28 +4733,42 @@
   };
 
   // ============ SAMPLE DATASET (evaluation) ============
+  const SAMPLE_BANNER_DISMISS_KEY = 'sampleMissionBannerDismissed';
   function setSampleDataLoaded(on) {
     sampleDataLoaded = !!on;
     const banner = document.getElementById('sampleDataBanner');
-    if (banner) banner.style.display = on ? 'flex' : 'none';
+    if (!banner) return;
+    // A new mission load (or a reset) always clears any prior dismissal, so the
+    // banner reappears for the freshly-loaded sample.
+    try { localStorage.removeItem(SAMPLE_BANNER_DISMISS_KEY); } catch (e) {}
+    banner.classList.remove('dismissing');
+    banner.style.display = on ? 'flex' : 'none';
+  }
+  function dismissSampleBanner() {
+    const banner = document.getElementById('sampleDataBanner');
+    if (!banner) return;
+    try { localStorage.setItem(SAMPLE_BANNER_DISMISS_KEY, '1'); } catch (e) {}
+    banner.classList.add('dismissing'); // fade out
+    setTimeout(function() { if (banner.classList.contains('dismissing')) banner.style.display = 'none'; }, 260);
   }
 
-  // Loads a fake "Sample City" area plus ~500 synthetic incidents with a
-  // realistic urban spatial pattern and a 30-day timestamp span, so evaluators
-  // can run the tool end-to-end without uploading sensitive data.
+  // Loads a representative real-Dubai urban operational area (Downtown / Business
+  // Bay / Bur Dubai, ~80 km²) plus ~250 SYNTHETIC incidents with a realistic
+  // urban spatial pattern and a 30-day timestamp span — so evaluators can run the
+  // tool end-to-end without uploading sensitive data. Geography is real Dubai;
+  // the incidents are entirely fabricated (no real Dubai Police data).
   function loadSampleDataset() {
     resetAll();
-    // "Sample City" footprint (~280 km²). A moderately large area keeps the KDE
-    // grid cells coarse enough that the smoothed optimizer stays responsive
-    // (a few seconds) for a first-run evaluation.
-    const bounds = L.latLngBounds([25.02, 55.12], [25.17, 55.29]);
+    // Representative Dubai urban core (~80 km²): high-density commercial
+    // (Downtown / Business Bay) plus mixed-use residential (Bur Dubai / Deira).
+    const bounds = L.latLngBounds([25.18, 55.25], [25.27, 55.33]);
     const rect = L.rectangle(bounds, { color: '#7CDCE8', weight: 1.5, dashArray: '4,4', fillColor: '#7CDCE8', fillOpacity: 0.12 });
     handleAreaCreated(rect);
     if (map.fitBounds) map.fitBounds(bounds, { padding: [40, 40] });
 
-    // ~250 hotspot-clustered incidents: realistic and fast to compute end-to-end;
-    // the Generate flow still supports far larger sets.
-    incidents = generateClustered(250);
+    // ~250 synthetic incidents with a mixed-urban pattern (commercial-district
+    // clusters plus scattered residential calls). Fast to compute end-to-end.
+    incidents = generateMixedUrban(250);
     const spanHours = 720; // 30 days
     const anchorMs = Date.now() - spanHours * 3600000;
     assignTimestamps(incidents, spanHours);
@@ -4689,7 +4783,7 @@
     setPanelState('panel3', null);
     document.getElementById('optimizeBtn').disabled = false;
     const status2 = document.getElementById('status2');
-    if (status2) { status2.textContent = `Sample City mission loaded — ${incidents.length} incidents`; status2.classList.add('good'); }
+    if (status2) { status2.textContent = `Sample mission: Dubai — ${incidents.length} synthetic incidents`; status2.classList.add('good'); }
     document.getElementById('m-incidents').textContent = incidents.length;
     document.getElementById('m-stations').textContent = '—';
     document.getElementById('m-coverage').textContent = '—';
@@ -4700,13 +4794,21 @@
     updateIncidentStats({ realTimestamps: true, anchorMs, spanHours });
     syncStepNavButtons();
     setSampleDataLoaded(true);
-    setFooter('Sample mission loaded — for evaluation only');
+    setFooter('Sample mission: Dubai (representative geography, synthetic incidents) — for evaluation only');
   }
 
   const loadSampleBtn = document.getElementById('loadSampleBtn');
   if (loadSampleBtn) loadSampleBtn.onclick = loadSampleDataset;
-  const sampleBannerClear = document.getElementById('sampleBannerClear');
-  if (sampleBannerClear) sampleBannerClear.onclick = function() { resetAll(); };
+  // The banner markup lives after this script in the DOM, so wire its dismiss
+  // button once the document is parsed.
+  (function wireSampleBannerDismiss() {
+    function wire() {
+      const btn = document.getElementById('sampleBannerDismiss');
+      if (btn) btn.onclick = dismissSampleBanner;
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
+    else wire();
+  })();
 
   function updateRadius() {
     const manual = inputRadiusToM(document.getElementById('manualRadius').value);
@@ -7423,7 +7525,9 @@
         color: c.color || CATEGORY_COLOR_POOL[0],
         kpiSec: c.kpi_seconds != null ? c.kpi_seconds : (c.kpiSec != null ? c.kpiSec : 60),
         serviceLevel: c.service_level_target != null ? c.service_level_target : (c.serviceLevel != null ? c.serviceLevel : 0.95),
-        weight: c.weight != null ? c.weight : 1
+        weight: c.weight != null ? c.weight : 1,
+        // Loaded mix values are deliberate — preserve them through later add/remove.
+        userSetMix: true
       }));
 
       // Backward compatibility: v1/v2 plans stored overhead per category. When a

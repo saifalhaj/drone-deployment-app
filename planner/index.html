@@ -109,7 +109,7 @@
 
  <div class="sample-mini">
  <div class="sample-mini-eyebrow">Just exploring?</div>
- <div class="sample-mini-desc">Load a ready-made "Sample City" mission to explore the tool end-to-end.</div>
+ <div class="sample-mini-desc">Load a ready-made Dubai representative mission (real geography, synthetic incidents) to explore the tool end-to-end.</div>
  <button class="btn btn-ghost sample-mini-btn" type="button" id="loadSampleBtn">Load Sample Mission</button>
  </div>
 
@@ -300,10 +300,11 @@
  </div>
 
  <div class="subsection-label" style="margin-top: 14px;">
- Incident KPIs
- <span class="hint">name - KPI - target - weight</span>
+ Incident Categories
+ <span class="hint">name · response KPI · target · mix</span>
  </div>
  <div id="categoriesList" class="categories-list"></div>
+ <div id="categoryMixSum" class="cat-mix-sum" aria-live="polite"></div>
  <button class="btn btn-secondary" id="addCategoryBtn" style="margin-top: 6px;">+ Add Category</button>
 
  <div class="mode-tabs" role="tablist" style="margin-bottom: 10px; margin-top: 14px;">
@@ -317,7 +318,7 @@
  <label class="field-label">Count</label>
  <input type="number" id="incidentCount" value="120" min="5" max="2000">
  </div>
- <p class="help" style="margin-top: 8px; font-size: 11px;">Probability of each category is driven by the <strong>Priority Weight</strong> field in the Incident KPIs section above. Defaults to Mixed Urban Demand distribution.</p>
+ <p class="help" style="margin-top: 8px; font-size: 11px;">Probability of each category is driven by the <strong>Category Mix (%)</strong> field in the Incident Categories section above. Defaults to Mixed Urban Demand distribution.</p>
  <details class="advanced-settings" id="generateAdvanced">
  <summary>Advanced</summary>
  <div class="field" style="margin-top: 10px;">
@@ -722,8 +723,8 @@
 <!-- ============ SAMPLE DATA BANNER ============ -->
 <div id="sampleDataBanner" class="sample-banner" style="display:none;">
  <span class="sample-banner-dot"></span>
- <span id="sampleBannerText">Sample mission loaded — for evaluation only</span>
- <button class="sample-banner-clear" id="sampleBannerClear" type="button">Clear</button>
+ <span id="sampleBannerText">Sample mission: Dubai (representative urban deployment) — for evaluation only</span>
+ <button class="sample-banner-dismiss" id="sampleBannerDismiss" type="button" aria-label="Dismiss banner" title="Dismiss">×</button>
 </div>
 
 <!-- ============ FIRST-USE ONBOARDING MODAL ============ -->

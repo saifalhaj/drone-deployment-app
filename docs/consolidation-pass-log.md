@@ -220,3 +220,45 @@ scan ran before/around the About de-dup and did not see `src/about-modal.js`):
    ignored; load failure → caught, logged, empty planner. Verified end-to-end via
    the real landing CTA click: sample loads, onboarding skipped, banner shown,
    URL cleaned to `/planner/`, and a subsequent reload does not re-trigger.
+
+## 2026-05-31 — Categories rework, banner dismiss, MC explainer, Dubai sample
+
+1. **Incident Categories section.** Renamed "Incident KPIs" → "Incident
+   Categories". Relabeled the weight field "Priority Weight" → "Category Mix (%)"
+   — the UI now shows/accepts a percentage (0–100, one decimal) while the data
+   model keeps `category.weight` as a decimal (0–1); conversion happens at the
+   input/output boundary (`formatMixPct`, and `weight = pct/100` on input).
+   Default names are now Critical / Urgent / Routine / Category D…  Adding or
+   removing a category even-splits the mix across non-manually-edited categories
+   (`redistributeMix`, last absorbs rounding), tracked by a `userSetMix` flag set
+   on first edit; loaded plans mark their categories user-set so add/remove won't
+   clobber them. An inline sum indicator (`#categoryMixSum`) reads green at 100%,
+   amber otherwise. Backward compatible: a saved `weight: 0.2` displays "20".
+   `getPriorityMix` is unchanged (still normalizes), so generation proportions
+   are preserved (verified ~20/30/50 from a 20/30/50 config).
+
+2. **Dismissible sample banner.** Replaced the banner's "Clear" button with a
+   small × dismiss that fades the banner out, hides it for the session, and sets
+   `localStorage.sampleMissionBannerDismissed`. Loading a mission (or reset)
+   clears the flag and re-shows the banner. Wiring deferred to DOMContentLoaded
+   because the banner markup follows the app.js script tag.
+
+3. **Monte Carlo empty robust-core explainer.** When zero locations meet the
+   robustness threshold, the headline now reads "No locations met the N%
+   robustness threshold" and an amber-bordered panel explains the two likely
+   causes (dataset too small — quotes the current incident count vs the 100/area
+   recommendation; demand too dispersed — points to the Advanced threshold) and
+   notes the map shows top-frequency candidates as alternatives.
+
+4. **Sample mission → Dubai.** The sample now loads a representative real-Dubai
+   urban area (~80 km², Downtown / Business Bay / Bur Dubai) with a mixed-urban
+   synthetic incident pattern. Banner: "Sample mission: Dubai (representative
+   urban deployment) — for evaluation only"; the Step-01 card and footer make the
+   real-geography / synthetic-incident distinction explicit. No "Sample City"
+   references remain.
+
+Verified headless: section header, Category Mix input/storage, Urgent/Routine
+defaults, even-split + userSetMix preservation, green/amber sum, decimal→percent
+reload, generation proportions, banner dismiss + flag + re-show, MC explainer
+panel, Dubai area + text. node --check (app.js, about-modal.js) + build clean;
+no console errors; shadowing scan clean.
