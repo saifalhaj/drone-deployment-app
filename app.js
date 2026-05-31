@@ -3876,9 +3876,18 @@
     ctx.fill();
   }
 
+  // True when a KDE demand surface has been computed. Both prospective methods —
+  // Smoothed Demand and Monte Carlo — build this grid (set lastDemandGrid), so the
+  // heatmap should render the calm demand surface for either. Keying only on
+  // SMOOTHED_GROWTH made Monte Carlo fall through to the additive per-incident
+  // bloom, which blows out to white over dense incident sets.
+  function hasDemandSurface() {
+    return !!(lastDemandGrid && Array.isArray(lastDemandGrid.activeCells) && lastDemandGrid.activeCells.length);
+  }
+
   function drawIncidentHeatmap(ctx) {
     if (!heatmapEnabled) return;
-    if (getSelectedPlanningMode() === PLANNING_MODE.SMOOTHED_GROWTH && lastDemandGrid && Array.isArray(lastDemandGrid.activeCells)) {
+    if (hasDemandSurface()) {
       const cells = lastDemandGrid.activeCells;
       if (cells.length === 0) return;
       const zoom = map.getZoom();
@@ -3930,7 +3939,7 @@
       el.textContent = 'Load incidents to render demand density.';
       return;
     }
-    if (getSelectedPlanningMode() === PLANNING_MODE.SMOOTHED_GROWTH && lastDemandGrid) {
+    if (hasDemandSurface()) {
       el.textContent = `${lastDemandGrid.activeCells.length} KDE demand cells shown - ${formatDistance(lastDemandGrid.bandwidthMeters)} smoothing radius`;
       return;
     }
@@ -7569,7 +7578,7 @@
     }
 
     // 3e. Optional incident-demand heatmap, included in the PDF when enabled.
-    if (heatmapEnabled && getSelectedPlanningMode() === PLANNING_MODE.SMOOTHED_GROWTH && lastDemandGrid) {
+    if (heatmapEnabled && hasDemandSurface()) {
       const cells = lastDemandGrid.activeCells || [];
       const radius = Math.max(12, Math.min(42, 12 + map.getZoom() * 1.2));
       const heatMaxW = Math.max(1e-9, ...cells.map(c => Number(c.normalizedWeight) || 0));
