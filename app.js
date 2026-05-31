@@ -5350,6 +5350,101 @@
     triggerBlobDownload(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `UASC_DFR_Station_Schedule_${new Date().toISOString().slice(0,10)}.csv`);
   };
 
+  // ============ EXCEL (.xlsx) DEPLOYMENT SCHEDULE EXPORT (Item 5) ============
+  function xlNum(v, d) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '';
+    const m = Math.pow(10, d == null ? 1 : d);
+    return Math.round(n * m) / m;
+  }
+  function domMetricNumber(id) {
+    const el = document.getElementById(id);
+    if (!el) return '';
+    const cleaned = el.textContent.replace(/[^\d.\-]/g, '');
+    return cleaned === '' ? '' : Number(cleaned);
+  }
+  // Recommended-layout worksheet rows (header + per-station + spacer + summary).
+  function buildRecommendedSheetAOA() {
+    const header = ['Station ID', 'Name', 'Latitude', 'Longitude', 'Platform', 'Unit Count',
+      'Incidents Covered', 'Geographic Coverage %', 'KPI Compliance %', 'Network Load %', 'Status'];
+    const aoa = [header];
+    const totalIncidents = incidents.length || 0;
+    stations.forEach((s, i) => {
+      const covered = s.covered || (s.incidentIdx ? s.incidentIdx.length : 0);
+      const load = s.loadMetrics || {};
+      const shortfall = s.shortfall || 0;
+      aoa.push([
+        `S${String(i + 1).padStart(2, '0')}`,
+        s.name || `DFR Station ${String(i + 1).padStart(2, '0')}`,
+        xlNum(s.lat, 6), xlNum(s.lng, 6),
+        s.typeName || 'DroneBox',
+        s.units || 1,
+        covered,
+        totalIncidents ? xlNum(covered / totalIncidents * 100, 1) : '',
+        xlNum((s.achievedServiceLevel || 0) * 100, 1),
+        xlNum(load.loadPct || 0, 1),
+        shortfall > 0 ? `Short ${shortfall} unit${shortfall === 1 ? '' : 's'}` : 'OK'
+      ]);
+    });
+    const net = buildNetworkLoadSummary(stations);
+    const totalUnits = stations.reduce((a, s) => a + (s.units || 1), 0);
+    const totalCovered = stations.reduce((a, s) => a + (s.covered || (s.incidentIdx ? s.incidentIdx.length : 0)), 0);
+    aoa.push([]);
+    aoa.push(['NETWORK', 'Totals / network-wide', '', '', '', totalUnits, totalCovered,
+      domMetricNumber('m-coverage'), domMetricNumber('m-kpi'), xlNum(net.loadPct || 0, 1), '']);
+    return aoa;
+  }
+  // Current-vs-recommended worksheet (only when an existing deployment was set).
+  function buildComparisonSheetAOA() {
+    if (!lastComparison) return null;
+    const c = lastComparison;
+    const fmt = (g) => [g.count, g.units, xlNum(g.coveragePct, 1), xlNum(g.kpiPct, 1), xlNum(g.loadPct, 1)];
+    return [
+      ['Metric', 'Current Layout', 'Recommended Layout'],
+      ['Station count', c.current.count, c.recommended.count],
+      ['Unit count', c.current.units, c.recommended.units],
+      ['Geographic coverage %', xlNum(c.current.coveragePct, 1), xlNum(c.recommended.coveragePct, 1)],
+      ['KPI compliance %', xlNum(c.current.kpiPct, 1), xlNum(c.recommended.kpiPct, 1)],
+      ['Network load %', xlNum(c.current.loadPct, 1), xlNum(c.recommended.loadPct, 1)],
+      [],
+      ['Delta analysis', '', ''],
+      ['Keep (stations)', c.delta.keep, ''],
+      ['Add (stations)', c.delta.add, ''],
+      ['Consider removing (stations)', c.delta.remove, '']
+    ];
+  }
+  function buildOperationFileStamp() {
+    const raw = (document.getElementById('operationIdInput') && document.getElementById('operationIdInput').value) || 'UASC-DFR';
+    const opId = raw.trim().replace(/[^\w-]+/g, '_').replace(/^_+|_+$/g, '') || 'UASC-DFR';
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const ts = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
+    return { opId, ts };
+  }
+  const exportExcelBtn = document.getElementById('exportExcelBtn');
+  if (exportExcelBtn) exportExcelBtn.onclick = function () {
+    if (stations.length === 0) {
+      alert('Compute a deployment before exporting to Excel.');
+      return;
+    }
+    if (typeof XLSX === 'undefined') {
+      alert('The Excel library failed to load. Check your network connection and reload.');
+      return;
+    }
+    const wb = XLSX.utils.book_new();
+    const recWs = XLSX.utils.aoa_to_sheet(buildRecommendedSheetAOA());
+    recWs['!cols'] = [{ wch: 10 }, { wch: 24 }, { wch: 12 }, { wch: 12 }, { wch: 22 }, { wch: 10 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, recWs, 'Recommended');
+    const cmpAoa = buildComparisonSheetAOA();
+    if (cmpAoa) {
+      const cmpWs = XLSX.utils.aoa_to_sheet(cmpAoa);
+      cmpWs['!cols'] = [{ wch: 30 }, { wch: 18 }, { wch: 20 }];
+      XLSX.utils.book_append_sheet(wb, cmpWs, 'Current vs Recommended');
+    }
+    const stamp = buildOperationFileStamp();
+    XLSX.writeFile(wb, `dfr-deployment-${stamp.opId}-${stamp.ts}.xlsx`);
+  };
+
   function latLngToPlain(ll) {
     return { lat: Number(ll.lat), lng: Number(ll.lng) };
   }
@@ -5599,6 +5694,17 @@
   ];
   let optMode = 'minimize';
   let fleetTypes = [];
+
+  // ============ EXISTING DEPLOYMENT (Item 1) — shared state ============
+  // User-specified current stations (placed on map or uploaded). Populated by
+  // the existing-deployment feature; consumed by the comparison view and the
+  // Excel/PDF/JSON exports. Empty array = "None" (current optimizer behavior).
+  let existingStations = [];
+  let existingDeploymentMode = 'none'; // 'none' | 'place' | 'upload'
+  // Last computed current-vs-recommended comparison (or null). Shape:
+  // { current:{stations,units,coveragePct,kpiPct,loadPct,count},
+  //   recommended:{...}, delta:{keep,add,remove} }
+  let lastComparison = null;
 
   // ============ DRONE PLATFORM CATALOG ============
   // serviceTimeMin = total cycle time per call (typical mission ~10 min + downtime).
