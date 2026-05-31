@@ -93,7 +93,17 @@
  <span id="railProgressText">1/4 - 25%</span>
  </div>
  </nav>
- <div id="map"></div>
+ <div id="map">
+ <div id="computeOverlay" class="compute-overlay" style="display:none;">
+ <div class="compute-card">
+ <div class="compute-spinner" aria-hidden="true"></div>
+ <div class="compute-text" id="computeOverlayText">Computing deployment…</div>
+ <div class="compute-progress" id="computeOverlayProgress" style="display:none;">
+ <div class="compute-progress-bar" id="computeOverlayProgressBar"></div>
+ </div>
+ </div>
+ </div>
+ </div>
  <aside id="sidebar">
 
  <div class="panel panel-permanent" id="panel-kpi">
@@ -425,23 +435,31 @@
  <span class="step-tag">STEP 03</span>
  <span class="panel-title">Compute Deployment</span>
  </div>
- <p class="help">Pick a planning approach, then compute where to place stations and how many drones each needs to meet your response-time KPIs.</p>
- <div class="subsection-label">Planning Mode</div>
- <div class="mode-tabs planning-mode-tabs" role="group" aria-label="Planning mode">
- <button class="mode-tab active" type="button" data-planning-mode="smoothed-growth">Smoothed Demand</button>
- <button class="mode-tab" type="button" data-planning-mode="direct-fit">Direct Fit</button>
- <button class="mode-tab" type="button" data-planning-mode="monte-carlo">Monte Carlo</button>
+ <p class="help">Choose your analytical approach — review past coverage retrospectively, or plan future deployment prospectively. The optimizer then computes station locations and unit counts for your selected approach.</p>
+ <div class="subsection-label">Analytical Approach</div>
+ <div class="mode-tabs" role="group" aria-label="Analytical approach">
+ <button class="mode-tab" type="button" data-approach="retrospective">Retrospective</button>
+ <button class="mode-tab active" type="button" data-approach="prospective">Prospective</button>
+ </div>
+ <p class="help mode-brief approach-desc" data-approach="retrospective" style="display:none;">How should we have deployed for past incidents? Useful for after-action review or known fixed events.</p>
+ <p class="help mode-brief approach-desc" data-approach="prospective">How should we plan deployment for expected future demand? Useful for annual planning and procurement decisions.</p>
+ <div id="prospectiveMethod">
+ <div class="subsection-label" style="margin-top: 12px;">Method</div>
+ <div class="mode-tabs method-tabs" role="group" aria-label="Method">
+ <button class="mode-tab active" type="button" data-method="smoothed-growth">Smoothed Demand</button>
+ <button class="mode-tab" type="button" data-method="monte-carlo">Monte Carlo</button>
+ </div>
+ <p class="help mode-brief method-desc" data-method="smoothed-growth">Plan a robust deployment for the historical demand pattern, with optional growth scaling for expected demand increase.</p>
+ <p class="help mode-brief method-desc" data-method="monte-carlo" style="display:none;">Validate the deployment with statistical confidence intervals across multiple synthetic future scenarios. Useful for procurement defense.</p>
  </div>
  <div class="status-line" id="directFitWarning" style="display:none;">Direct Fit places stations around the exact incidents loaded in this session. It is useful for forensic review, fixed-event planning, and explaining how a known historical period would have been covered. It is not suitable for procurement planning or annual deployment sizing because it can overfit isolated calls, missing records, and random historical noise. For station investment decisions, use Smoothed Demand + Growth or Monte Carlo.</div>
  <div id="directFitPanel" style="display:none;">
- <p class="help mode-brief">Places stations around the exact incidents you loaded. Best for reviewing a specific past period or event — not for long-term procurement, since it can overfit one-off calls.</p>
  <details class="advanced-settings" id="directFitAdvanced">
  <summary>Advanced</summary>
  <div class="advanced-targets-slot" data-targets-slot></div>
  </details>
  </div>
  <div id="smoothedGrowthPanel">
- <p class="help mode-brief">Smooths your incidents into demand hotspots and plans around the overall pattern. Best for everyday capacity planning and procurement — robust to noise and missing records.</p>
  <div class="field">
  <label class="field-label">Demand Growth Scenario</label>
  <select id="growthMultiplier">
@@ -484,7 +502,6 @@
  </details>
  </div>
  <div id="monteCarloPanel" style="display:none;">
- <p class="help mode-brief">Simulates many possible futures from your demand pattern and keeps the stations that show up most often. Best when you want confidence that a plan holds up across different scenarios, not just one.</p>
  <div class="field-row">
  <div class="field">
  <label class="field-label">Monte Carlo Runs</label>

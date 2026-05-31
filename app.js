@@ -276,6 +276,9 @@
   }
 
   let planningModeState = createDefaultPlanningModeState();
+  // UI layer above the planning-mode state: the "Prospective" method last chosen
+  // (smoothed-growth or monte-carlo), preserved while Retrospective is active.
+  let prospectiveMethod = PLANNING_MODE.SMOOTHED_GROWTH;
 
   // ============ UTILITIES ============
   function haversine(a, b) {
@@ -875,6 +878,31 @@
     if (host && block.parentElement !== host) host.appendChild(block);
   }
 
+  // Drive the two-tier Step-03 UI (Analytical Approach + Method) from the active
+  // planning-mode identifier. Retrospective = direct-fit; Prospective = smoothed
+  // or monte-carlo. The last Prospective method is remembered so toggling to
+  // Retrospective and back restores it.
+  function syncApproachUI(mode) {
+    const isRetro = mode === PLANNING_MODE.DIRECT_FIT;
+    if (!isRetro) prospectiveMethod = mode;
+    const activeApproach = isRetro ? 'retrospective' : 'prospective';
+    document.querySelectorAll('.mode-tab[data-approach]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.approach === activeApproach);
+    });
+    document.querySelectorAll('.approach-desc').forEach(el => {
+      el.style.display = el.dataset.approach === activeApproach ? '' : 'none';
+    });
+    const methodWrap = document.getElementById('prospectiveMethod');
+    if (methodWrap) methodWrap.style.display = isRetro ? 'none' : 'block';
+    const activeMethod = isRetro ? prospectiveMethod : mode;
+    document.querySelectorAll('.mode-tab[data-method]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.method === activeMethod);
+    });
+    document.querySelectorAll('.method-desc').forEach(el => {
+      el.style.display = el.dataset.method === activeMethod ? '' : 'none';
+    });
+  }
+
   function setPlanningMode(mode, opts) {
     opts = opts || {};
     if (!Object.values(PLANNING_MODE).includes(mode)) mode = PLANNING_MODE.SMOOTHED_GROWTH;
@@ -882,9 +910,7 @@
     if (previous === mode && !opts.force) return;
     if (!opts.silent) cacheCurrentPlanningResult();
     planningModeState = mergePlanningModeState({ ...planningModeState, mode });
-    document.querySelectorAll('.mode-tab[data-planning-mode]').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.planningMode === mode);
-    });
+    syncApproachUI(mode);
     const smoothedPanel = document.getElementById('smoothedGrowthPanel');
     const monteCarloPanel = document.getElementById('monteCarloPanel');
     const directFitPanel = document.getElementById('directFitPanel');
@@ -931,8 +957,11 @@
     setInputValue('mcRobustCoreThreshold', mc.robustCoreThresholdPct == null ? 60 : mc.robustCoreThresholdPct);
     setInputValue('mcRandomSeed', mc.randomSeed);
     setInputValue('mcVisualizationMode', mc.visualizationMode || 'consensus-overlay');
-    document.querySelectorAll('.mode-tab[data-planning-mode]').forEach(btn => {
-      btn.onclick = () => setPlanningMode(btn.dataset.planningMode);
+    document.querySelectorAll('.mode-tab[data-approach]').forEach(btn => {
+      btn.onclick = () => setPlanningMode(btn.dataset.approach === 'retrospective' ? PLANNING_MODE.DIRECT_FIT : prospectiveMethod);
+    });
+    document.querySelectorAll('.mode-tab[data-method]').forEach(btn => {
+      btn.onclick = () => setPlanningMode(btn.dataset.method);
     });
     ['growthMultiplier', 'kdeBandwidthMode', 'kdeGridResolution', 'kdeDemandThreshold'].forEach(id => {
       const el = document.getElementById(id);
@@ -3298,6 +3327,36 @@
     if (panel) panel.style.display = 'none';
   }
 
+  // ============ COMPUTE LOADING OVERLAY (over the map) ============
+  function showComputeOverlay(mode) {
+    const ov = document.getElementById('computeOverlay');
+    if (!ov) return;
+    const text = document.getElementById('computeOverlayText');
+    const prog = document.getElementById('computeOverlayProgress');
+    if (mode === PLANNING_MODE.MONTE_CARLO) {
+      const n = getMonteCarloSettings().runCount || 30;
+      if (text) text.textContent = `Running synthetic future 0 of ${n}…`;
+      if (prog) prog.style.display = 'block';
+      updateComputeProgress(0, n);
+    } else {
+      if (text) text.textContent = mode === PLANNING_MODE.SMOOTHED_GROWTH
+        ? 'Computing smoothed demand deployment…'
+        : 'Computing deployment…';
+      if (prog) prog.style.display = 'none';
+    }
+    ov.style.display = 'flex';
+  }
+  function updateComputeProgress(done, total) {
+    const text = document.getElementById('computeOverlayText');
+    const bar = document.getElementById('computeOverlayProgressBar');
+    if (text) text.textContent = `Running synthetic future ${done} of ${total}…`;
+    if (bar) bar.style.width = (total > 0 ? Math.round((100 * done) / total) : 0) + '%';
+  }
+  function hideComputeOverlay() {
+    const ov = document.getElementById('computeOverlay');
+    if (ov) ov.style.display = 'none';
+  }
+
   async function runMonteCarloCore(planning, settings, onProgress) {
     const startedAtMs = performance.now();
     const smoothedSettings = {
@@ -4931,12 +4990,17 @@
       monteCarloResult = null;
       monteCarloInspectState = null;
       renderMonteCarloProgress(0, mcSettings.runCount);
+      showComputeOverlay(PLANNING_MODE.MONTE_CARLO);
       document.getElementById('optimizeBtn').disabled = true;
       document.getElementById('optimizeBtn').textContent = 'Running...';
       setFooter('Running Monte Carlo...');
       const temporalProbe = fitTemporalProfile(incidents, mcSettings);
       if (temporalProbe.warning) alert(temporalProbe.warning);
-      runMonteCarloCore(planning, mcSettings, renderMonteCarloProgress)
+      const onMcProgress = function(done, total) {
+        renderMonteCarloProgress(done, total);
+        updateComputeProgress(done, total);
+      };
+      runMonteCarloCore(planning, mcSettings, onMcProgress)
         .then(result => {
           monteCarloResult = result;
           lastDemandGrid = result.demandGrid;
@@ -4975,12 +5039,17 @@
             document.getElementById('status3').classList.remove('good');
           } else {
             console.error('Monte Carlo error:', err);
-            setFooter('Monte Carlo failed - see browser console');
-            alert('Monte Carlo failed: ' + (err && err.message ? err.message : err));
+            setFooter('Monte Carlo failed — see the deployment status for details');
+            const s3 = document.getElementById('status3');
+            if (s3) {
+              s3.classList.remove('good');
+              s3.innerHTML = `<span style="color:var(--incident)">Monte Carlo failed: ${escapeHtml(err && err.message ? err.message : String(err))}. See the browser console (F12) for details.</span>`;
+            }
           }
         })
         .finally(() => {
           hideMonteCarloProgress();
+          hideComputeOverlay();
           monteCarloController = null;
           document.getElementById('optimizeBtn').disabled = false;
           document.getElementById('optimizeBtn').textContent = 'Re-compute';
@@ -4990,12 +5059,13 @@
     setFooter(planningMode === PLANNING_MODE.SMOOTHED_GROWTH ? 'Computing smoothed demand deployment...' : 'Computing direct fit deployment...');
     document.getElementById('optimizeBtn').disabled = true;
     document.getElementById('optimizeBtn').textContent = 'Computing...';
+    showComputeOverlay(planningMode);
 
-    // Refresh zone caches once per run — used by all hot-path geometry checks
-    computeZoneCaches();
-
-    // Async to allow UI update
+    // Defer so the overlay paints before the synchronous computation blocks the
+    // main thread (50ms is comfortably past a paint frame).
     setTimeout(function() {
+      // Refresh zone caches once per run — used by all hot-path geometry checks
+      computeZoneCaches();
       try {
         let result;
         const planning = getPlanningParams();
@@ -5097,18 +5167,24 @@
         renderStationDetail(null);
         cacheCurrentPlanningResult();
 
+        hideComputeOverlay();
         document.getElementById('optimizeBtn').disabled = false;
         document.getElementById('optimizeBtn').textContent = 'Re-compute';
         syncStepNavButtons();
         setFooter(`Deployment ready · ${stations.length} stations`);
       } catch (err) {
         console.error('Optimization error:', err);
+        hideComputeOverlay();
         document.getElementById('optimizeBtn').disabled = false;
         document.getElementById('optimizeBtn').textContent = 'Compute Deployment';
-        setFooter('Compute failed — see browser console for details');
-        alert('Compute failed: ' + (err && err.message ? err.message : err) + '\nSee the browser console (F12) for the full trace.');
+        const status3 = document.getElementById('status3');
+        if (status3) {
+          status3.classList.remove('good');
+          status3.innerHTML = `<span style="color:var(--incident)">Compute failed: ${escapeHtml(err && err.message ? err.message : String(err))}. See the browser console (F12) for details.</span>`;
+        }
+        setFooter('Compute failed — see the deployment status for details');
       }
-    }, 30);
+    }, 50);
   };
 
   function resetAll() {

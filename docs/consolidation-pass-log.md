@@ -297,3 +297,42 @@ copy, <3 s load with no external call, and all three planning modes compute
 (Smoothed 35 sites / 88%, Direct Fit 22 / 90%, Monte Carlo completes — and its
 empty robust-core explainer shows at the default threshold). node --check +
 build clean; no console errors/warnings; shadowing scan clean.
+
+## 2026-05-31 — Step 03: analytical-approach hierarchy + compute loading overlay
+
+PART A — Analytical Approach restructure:
+- Replaced the flat "Planning Mode" 3-tab control with a primary two-tab toggle
+  (ANALYTICAL APPROACH: Retrospective / Prospective, Prospective default) and,
+  under Prospective, a nested METHOD toggle (Smoothed Demand / Monte Carlo).
+  Per-tab descriptions show only for the active tab; the old per-panel mode
+  briefs were removed.
+- UI maps to the unchanged planning-mode-state identifiers: Retrospective →
+  direct-fit, Prospective+Smoothed → smoothed-growth, Prospective+Monte Carlo →
+  monte-carlo. New `syncApproachUI(mode)` drives the toggles/descriptions/panel
+  visibility from the mode; `setPlanningMode` calls it. A `prospectiveMethod`
+  UI var remembers the last Prospective method so toggling to Retrospective and
+  back restores it. Saved plans reload straight into the right toggle state via
+  the existing mode identifier (no migration). Header copy updated; nested
+  toggle styled with a left accent rail + slightly smaller tabs.
+- About modal page 2 reframed to present the three modes as Retrospective
+  (Direct Fit) / Prospective (Smoothed Demand) / Prospective (Monte Carlo).
+
+PART B — Compute loading overlay:
+- Added a map-area overlay (#computeOverlay inside #map): dim + centered dark
+  card with a CSS spinner, mode-specific text, and (Monte Carlo only) a progress
+  bar. Shown synchronously on Compute, then the synchronous Smoothed/Direct Fit
+  computation is deferred 50 ms so the overlay paints before the freeze. Monte
+  Carlo hooks the existing per-run progress callback to update "Running
+  synthetic future X of N…" + the bar. Overlay hides on completion. The Compute
+  button is disabled during computation. On error the overlay hides, the Compute
+  button re-enables, and the failure is surfaced in the sidebar status (status3)
+  instead of an alert. The overlay lives on the always-visible map, so it
+  persists across step navigation while a run is in flight.
+
+Verified headless: default Prospective+Smoothed; Retrospective shows Direct Fit
++ warning and hides Method; switching back restores the prior method (Smoothed
+or Monte Carlo); saved plans for all three modes reload into the correct
+toggles; overlay appears immediately on Compute in every mode with the right
+text (Smoothed/Direct Fit no bar, Monte Carlo dynamic text + bar 60→100%) and
+hides on completion; button disabled during compute; About page 2 reframed.
+node --check + build clean; no console errors; shadowing scan clean.

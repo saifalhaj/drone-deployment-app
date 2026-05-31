@@ -1919,3 +1919,54 @@ input {
   border-left: 2px solid rgba(124, 220, 232, 0.4);
   padding-left: 9px; margin: 4px 0 12px;
 }
+
+/* ============ STEP 03: NESTED METHOD TOGGLE ============ */
+/* The Method toggle sits under the primary Analytical Approach toggle; a left
+   accent rail + slightly smaller tabs signal the nesting. */
+#prospectiveMethod {
+  border-left: 2px solid rgba(124, 220, 232, 0.28);
+  padding-left: 10px;
+  margin-top: 6px;
+}
+#prospectiveMethod .method-tabs .mode-tab {
+  font-size: 9px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+/* ============ COMPUTE LOADING OVERLAY (map area) ============ */
+.compute-overlay {
+  position: absolute; inset: 0; z-index: 1200;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(6, 8, 11, 0.55);
+}
+.compute-card {
+  background: var(--surface-2); border: 1px solid var(--border-strong);
+  border-radius: 8px; padding: 22px 28px; min-width: 240px; max-width: 320px;
+  text-align: center; box-shadow: 0 14px 44px rgba(0,0,0,0.6);
+}
+.compute-spinner {
+  width: 34px; height: 34px; margin: 0 auto 14px;
+  border: 3px solid rgba(124, 220, 232, 0.22);
+  border-top-color: #7CDCE8; border-radius: 50%;
+  animation: compute-spin 0.8s linear infinite;
+}
+@keyframes compute-spin { to { transform: rotate(360deg); } }
+.compute-text {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px; letter-spacing: 0.4px; color: var(--text); line-height: 1.4;
+}
+.compute-progress {
+  margin-top: 14px; height: 6px; border-radius: 3px; overflow: hidden;
+  background: rgba(124, 220, 232, 0.16);
+}
+.compute-progress-bar {
+  height: 100%; width: 0%; background: #7CDCE8;
+  transition: width 0.2s ease;
+}
+
+/* ============ ABOUT MODAL: THREE-MODES LIST ============ */
+.about-modes { margin: 16px 0 4px; text-align: left; }
+.about-modes-list { margin: 0; padding-left: 18px; }
+.about-modes-list li { font-size: 13px; line-height: 1.5; color: var(--text-muted); margin-bottom: 6px; }
+.about-modes-list strong { color: var(--text); }
