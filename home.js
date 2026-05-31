@@ -200,9 +200,23 @@
     });
   }
 
+  function wireTermsModal() {
+    const modal = document.getElementById('termsModal');
+    const link = document.getElementById('termsLink');
+    if (!modal || !link) return;
+    const open = () => { modal.style.display = 'flex'; };
+    const close = () => { modal.style.display = 'none'; };
+    link.addEventListener('click', open);
+    modal.querySelectorAll('[data-terms-close]').forEach(el => el.addEventListener('click', close));
+    document.addEventListener('keydown', event => {
+      if (modal.style.display !== 'none' && event.key === 'Escape') close();
+    });
+  }
+
   updateUtcClock();
   setInterval(updateUtcClock, 1000);
   document.querySelectorAll('.drop-slot').forEach(wireDropSlot);
   wireAboutModal();
   wireSavedPlanLoader();
+  wireTermsModal();
 })();

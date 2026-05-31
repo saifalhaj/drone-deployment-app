@@ -530,6 +530,14 @@ a { color: inherit; text-decoration: none; }
   text-transform: uppercase;
 }
 
+.home-copyright {
+  margin: 0 18px 0 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.home-copyright .home-textlink { font-size: 8px; }
+
 .about-modal {
   position: fixed;
   inset: 0;

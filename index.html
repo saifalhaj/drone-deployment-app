@@ -102,7 +102,51 @@
     <div><span class="status-dot"></span><span>ENV</span><strong>PROD</strong></div>
     <div><span>BUILD</span><strong>9c4a · 27 MAY 26</strong></div>
     <p>UNMANNED AERIAL SYSTEMS CENTER · DUBAI POLICE</p>
+    <p class="home-copyright">© UASC, Dubai Police, 2026. All rights reserved. · <button type="button" class="home-textlink" id="termsLink">Terms of Use</button></p>
   </footer>
+</div>
+
+<!-- Terms of Use modal (reuses About-modal styling for dark-theme consistency) -->
+<div id="termsModal" class="about-modal" style="display:none;">
+  <div class="about-backdrop" data-terms-close></div>
+  <div class="about-card">
+    <div class="about-header">
+      <div class="about-header-left">
+        <span class="step-dot">LEGAL</span>
+        <span>Terms of Use</span>
+      </div>
+      <button class="about-close" id="termsClose" aria-label="Close" data-terms-close>x</button>
+    </div>
+    <div class="about-body">
+      <div class="about-page active">
+        <div class="about-eyebrow">TERMS OF USE</div>
+        <h2>Planning-grade tool. Use with judgment.</h2>
+        <p class="muted">© UASC, Dubai Police, 2026. All rights reserved. The DFR Deployment Planner is provided by the Unmanned Aerial Systems Center (UASC), Dubai Police.</p>
+
+        <div class="about-eyebrow" style="margin-top:18px; margin-bottom:6px;">WHO MAY USE IT</div>
+        <p class="muted" style="margin-top:0;">This tool is free for use by public-safety agencies, civil defense organizations, search-and-rescue teams, emergency medical services, and port and critical-infrastructure operators for planning and evaluation purposes.</p>
+
+        <div class="about-eyebrow" style="margin-top:14px; margin-bottom:6px;">PLANNING-GRADE RECOMMENDATIONS</div>
+        <p class="muted" style="margin-top:0;">Outputs are planning-grade. They are not suitable as the sole basis for operational, procurement, or deployment decisions without validation against your agency&rsquo;s specific operational realities, regulations, and airspace constraints.</p>
+
+        <div class="about-eyebrow" style="margin-top:14px; margin-bottom:6px;">NO WARRANTY</div>
+        <p class="muted" style="margin-top:0;">The tool is provided &ldquo;as is&rdquo;, without warranty of any kind, express or implied, including accuracy, completeness, or fitness for a particular purpose. UASC and Dubai Police accept no liability arising from its use.</p>
+
+        <div class="about-eyebrow" style="margin-top:14px; margin-bottom:6px;">DATA HANDLING</div>
+        <p class="muted" style="margin-top:0;">Incident files, operational areas, boundary uploads, and configuration you provide are processed entirely in your browser. This data is never uploaded to, transmitted to, or stored on any UASC or third-party server. The only outbound requests the tool makes are to load map tiles and &mdash; if you choose to use the optional administrative-boundary lookup &mdash; to fetch public boundary data; these reveal only the map area or country you select, never your incident data.</p>
+
+        <div class="about-eyebrow" style="margin-top:14px; margin-bottom:6px;">CONTACT</div>
+        <!-- PLACEHOLDER contact address — confirm the authoritative UASC inbox before public launch. -->
+        <p class="muted" style="margin-top:0;">For usage questions, bug reports, or licensing inquiries, contact the Unmanned Aerial Systems Center at <a href="mailto:uasc@dubaipolice.gov.ae">uasc@dubaipolice.gov.ae</a>.</p>
+      </div>
+    </div>
+    <div class="about-footer">
+      <span class="about-page-counter">UASC · DUBAI POLICE</span>
+      <div class="about-nav">
+        <button class="primary" id="termsCloseBtn" data-terms-close>Close</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script src="src/about-modal.js"></script>
