@@ -120,7 +120,7 @@
     // The shared About modal ships without a logo src (paths differ per page).
     const aboutLogo = document.getElementById('aboutPageLogo');
     if (aboutLogo && !aboutLogo.getAttribute('src')) aboutLogo.src = 'assets/uasc-logo.png';
-    const total = 3;
+    const total = modal.querySelectorAll('.about-page').length || 1;
     let currentPage = 0;
     const showPage = page => {
       currentPage = Math.max(0, Math.min(total - 1, page));

@@ -8444,7 +8444,7 @@
   // the modal nodes don't exist yet, so we wire the handlers after DOMContentLoaded
   // / on the next tick. setTimeout(fn, 0) is enough because the parser will have
   // finished by the time the timer fires.
-  const aboutTotal = 3;
+  let aboutTotal = 3;
   let aboutCurrentPage = 0;
 
   function showAboutPage(p) {
@@ -8473,6 +8473,7 @@
       console.error('About modal not found in DOM');
       return;
     }
+    aboutTotal = document.querySelectorAll('#aboutModal .about-page').length || aboutTotal;
     m.style.display = 'flex';
     showAboutPage(0);
   }
