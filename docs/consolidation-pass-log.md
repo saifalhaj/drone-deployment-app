@@ -367,3 +367,66 @@ incidents; Smoothed/Direct Fit compute (25 / 130 stations) with the overlay and
 hide it on completion; heatmap toggle preserves the 1200 incidents; "stopped
 early" renders in neutral gray (rgb(136,147,162)) in both Smoothed and Direct
 Fit. node --check + build clean; no console errors; shadowing scan clean.
+
+---
+
+## Pass — Public-release feature set (six items): 2026-05-31
+
+Six coordinated additions, each committed separately and verified headless.
+
+### Item 3 — Spatial index for KDE at scale
+New `src/spatial-index.js` (uniform grid hash). `buildDemandGrid` indexes
+incidents in the same planar meter-space metric as `demandDistanceMeters`, so a
+radius query returns exactly the in-cutoff set — byte-identical demand surface.
+`greedyWeightedDemandCoverage` uses the index as a broad phase (no-fly-free case)
+with the exact haversine narrow-phase kept. Verified equivalence on a fixed
+incident set (identical active cells, stations, coverage; max cell-weight delta
+4e-14 = fp summation-order). Smoothed pipeline total runtime: 1000→261ms,
+2500→294ms, 5000→332ms, 7500→336ms, 10000→396ms (brute-force 5000 was 15.4 s →
+51× faster). Targets (<5 s@5000, <15 s@10000) easily met. Adds verification-only
+`window.__dfrBenchmarkSmoothed`.
+
+### Item 1 — Existing-deployment comparison + locked stations
+Step 01 "Existing Deployment" control (None / Place on map / Upload CSV) with
+per-station editor rows (name, units, platform, Lock, remove) and amber map
+markers; outside-area / no-fly flags. Locked stations are seeded into both
+greedy routines (forced in, pre-cover their demand, greedy fills the rest).
+Comparison after compute: map colours (current amber / recommended cyan / kept
+green), Current-vs-Recommended metric table (stations, units, coverage %, KPI %,
+load %) via one shared geographic+loss-model evaluator, and Keep/Add/Remove
+delta. JSON gains `existing_deployment` / `recommended_deployment` / `comparison`;
+Excel gains a comparison sheet; PDF gains a dedicated comparison page. Scope
+note: fleet-mode Direct Fit (heterogeneous) does not seed locked stations.
+
+### Item 2 — Methods page in the About modal
+Fourth About page "Methods": greedy max-coverage (1−1/e bound), smoothed demand
+(KDE + Silverman), Monte Carlo (robust core + percentile CIs), time-aware
+concurrency simulation, assumptions/limitations, with brief citations. Page
+count made dynamic in both wiring sites (no hardcoded 3).
+
+### Item 5 — Excel (.xlsx) deployment-schedule export
+"Export Excel" in Step 04 (SheetJS). "Recommended" sheet: header + per-station
+rows + NETWORK summary row. Optional "Current vs Recommended" sheet when a
+comparison exists. Filename `dfr-deployment-{OpID}-{YYYYMMDD-HHMM}.xlsx`.
+
+### Item 6 — Terms of Use + copyright
+Landing footer "© UASC, Dubai Police, 2026. All rights reserved." + Terms modal
+(who-may-use, planning-grade caveat, no-warranty, data-handling, contact).
+Data-handling wording reflects an actual egress audit (no analytics/telemetry;
+uploads stay in-browser; only map tiles + optional boundary lookup leave the
+browser). Contact email is a flagged PLACEHOLDER pending the authoritative UASC
+inbox. About final page already carries the copyright line.
+
+### Item 4 — Arabic translation (Level 1, LTR) + i18n machinery
+Language selector in the Settings gear (English / العربية), persisted in
+localStorage, restored on load and across pages. DOM translator substitutes
+Arabic for exact English source strings on leaf nodes + placeholders, restoring
+English on switch-back; misses fall back to English. Layout stays LTR
+(`dir=ltr`); Arabic renders RTL within elements. `src/i18n-ar.js` is headed
+"ARABIC TRANSLATIONS — PENDING UASC AUTHORITATIVE REVIEW" and is an initial
+draft (nav, buttons, step titles, settings, metrics, About/Methods, Terms).
+Level-1 limits: mixed text+element nodes and JS-built dynamic strings stay
+English.
+
+All items: `node --check` (app.js, home.js, src/*), `node build.js`, and
+shadowing scan clean; headless verification passed; no console errors.
